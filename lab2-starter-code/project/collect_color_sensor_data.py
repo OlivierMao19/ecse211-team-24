@@ -20,6 +20,7 @@ wait_ready_sensors(True) # Input True to see what the robot is trying to initial
 
 def collect_color_sensor_data():
     "Collect color sensor data."
+    return
     ...
 
 
