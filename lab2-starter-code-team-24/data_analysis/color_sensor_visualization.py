@@ -15,7 +15,7 @@ from statistics import mean, stdev
 from matplotlib import pyplot as plt
 import numpy as np
 
-
+# Write hardcoded path to run script
 COLOR_SENSOR_DATA_FILE = "color_sensor.csv"
 
 
