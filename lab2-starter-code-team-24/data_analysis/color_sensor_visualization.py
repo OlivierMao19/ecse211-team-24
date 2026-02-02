@@ -41,6 +41,10 @@ with open(COLOR_SENSOR_DATA_FILE, "r") as f:
         green.append(g / denominator)
         blue.append(b / denominator)
 
+# Print mean and standard deviation for each color channel
+print(f"Red:   mean = {mean(red):.4f}, std = {stdev(red):.4f}")
+print(f"Green: mean = {mean(green):.4f}, std = {stdev(green):.4f}")
+print(f"Blue:  mean = {mean(blue):.4f}, std = {stdev(blue):.4f}")
 
 x_values = np.linspace(0, 1, 255)  # 255 evenly spaced values between 0 and 1
 plt.plot(x_values, gaussian(x_values, red), color="r")
