@@ -8,7 +8,7 @@ It must be run on the robot.
 # Add your imports here, if any
 from utils.brick import EV3ColorSensor, wait_ready_sensors, TouchSensor
 
-COLOR_SENSOR_DATA_FILE = "../data_analysis/color_sensor-red.csv"
+COLOR_SENSOR_DATA_FILE = "../data_analysis/color_sensor.csv"
 
 # complete this based on your hardware setup
 COLOR_SENSOR = EV3ColorSensor(2)
@@ -18,7 +18,7 @@ wait_ready_sensors(True) # Input True to see what the robot is trying to initial
 
 
 def collect_color_sensor_data():
-    "Collect color sensor data."
+    "Collect color sensor data. Upon each press of the touch sensor, the color sensor reads a measure and adds it to a csv"
     try:
         print("Press touch sensor to record one RGB sample.")
         while True:
