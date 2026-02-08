@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./lab2-starter-code-team-24/project"
+    ]
+}
