@@ -8,6 +8,7 @@ Drumming system:
 import threading
 from utils import sound
 from utils.brick import TouchSensor, EV3ColorSensor, Motor, wait_ready_sensors
+from color_classifier import ColorClassifier
 import time
 
 # Setup
@@ -25,6 +26,10 @@ NOTES = {
     "Yellow": "F4"
 }
 
+# Instantiate color classifier
+COLOR_CLASSIFIER = ColorClassifier(COLOR_SENSOR)
+
+
 def drum_loop(stop_event):
     """Continuously move drum back and forth until stopped."""
     while not stop_event.is_set():
@@ -38,7 +43,8 @@ def drum_loop(stop_event):
         DRUM_MOTOR.wait_is_stopped()
 
 def detect_color_and_play_note():
-    color = COLOR_SENSOR.get_rgb() # TO DO: IMPLEMENT ALGO FOR COLOR DETECTION
+    # Match a color from sensor measurement
+    color = COLOR_CLASSIFIER.classify()
     note = NOTES.get(color, None)
     if note:
         s = sound.Sound(duration=0.3, pitch=note, volume=80)
@@ -46,11 +52,11 @@ def detect_color_and_play_note():
         s.wait_done()
     else:
         print("Unknown color:", color)
+        return
 
 def main():
     wait_ready_sensors()
     drumming = False
-    drum_thread = None
     stop_event = threading.Event()
 
     print("Press button to start drumminggg")
@@ -70,13 +76,13 @@ def main():
                 drumming = True
                 stop_event.clear()
                 # Start the drumming in a background thread (btw - daemon = closes with main program)
-                drum_thread = threading.Thread(target=drum_loop, args=(stop_event,), daemon=True)
-                drum_thread.start()
+                threading.Thread(target=drum_loop, args=(stop_event,), daemon=True).start()
                 time.sleep(0.5) # debounce
             else:
                 print("Detecting color and playing note.")
                 detect_color_and_play_note()
                 time.sleep(0.5) # debounce
+                
         time.sleep(0.1)
 
 if __name__ == "__main__":
