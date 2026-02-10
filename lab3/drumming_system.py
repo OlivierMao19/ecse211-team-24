@@ -17,12 +17,12 @@ TOUCH_SENSOR = TouchSensor(1)
 COLOR_SENSOR = EV3ColorSensor(2)
 EMERGENCY_SENSOR = TouchSensor(3) # idk if that exists on the brickpi.. to verify
 
-DRUM_MOTOR.set_limits(power=60, dps=300) # Speed limit
+DRUM_MOTOR.set_limits(power=60, dps=600) # Speed limit
 
 NOTES = {
     "Red": "C4",
     "Green": "D4",
-    "Blue": "E4",
+    "Purple": "E4",
     "Yellow": "F4"
 }
 
@@ -33,25 +33,23 @@ COLOR_CLASSIFIER = ColorClassifier(COLOR_SENSOR)
 def drum_loop(stop_event):
     """Continuously move drum back and forth until stopped."""
     while not stop_event.is_set():
-        DRUM_MOTOR.set_position_relative(95)
+        DRUM_MOTOR.set_position(95)
         DRUM_MOTOR.wait_is_stopped()
-
         if stop_event.is_set():
             break
 
-        DRUM_MOTOR.set_position_relative(-95)
+        DRUM_MOTOR.set_position(-95)
         DRUM_MOTOR.wait_is_stopped()
-
 def detect_color_and_play_note():
     # Match a color from sensor measurement
     color = COLOR_CLASSIFIER.classify()
+    print(color)
     note = NOTES.get(color, None)
     if note:
         s = sound.Sound(duration=0.3, pitch=note, volume=80)
         s.play()
         s.wait_done()
     else:
-        print("Unknown color:", color)
         return
 
 def main():

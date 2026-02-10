@@ -10,7 +10,7 @@ class ColorClassifier:
         self.reference_colors = {
             "Red":    (0.8525, 0.0863, 0.0612),
             "Green":  (0.1667, 0.6631, 0.1703),
-            #"Blue":   (0.0, 0.0, 1.0),
+            "Purple":   (0.4304, 0.2704, 0.2993),
             "Yellow": (0.6077, 0.3580, 0.0343),
         }
 
