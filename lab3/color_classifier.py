@@ -6,7 +6,6 @@ class ColorClassifier:
     def __init__(self, sensor: EV3ColorSensor):
         self.sensor = sensor
 
-        # Missing blue average value - To measure tomorrow!
         self.reference_colors = {
             "Red":    (0.8525, 0.0863, 0.0612),
             "Green":  (0.1667, 0.6631, 0.1703),
@@ -50,7 +49,7 @@ class ColorClassifier:
         threshold: max allowed distance to accept a color match.
                    If the closest reference is still farther than threshold => return "Unknown".
 
-        returns: one of {"Red","Green","Blue","Yellow"} or "Unknown"
+        returns: one of {"Red","Green","Purple","Yellow"} or "Unknown"
 
         Behavior:
         - reads one RGB measurement from the sensor

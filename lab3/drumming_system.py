@@ -33,13 +33,10 @@ COLOR_CLASSIFIER = ColorClassifier(COLOR_SENSOR)
 def drum_loop(stop_event):
     """Continuously move drum back and forth until stopped."""
     while not stop_event.is_set():
-        DRUM_MOTOR.set_position(95)
+        DRUM_MOTOR.set_position_relative(45)
         DRUM_MOTOR.wait_is_stopped()
         if stop_event.is_set():
             break
-
-        DRUM_MOTOR.set_position(-95)
-        DRUM_MOTOR.wait_is_stopped()
 def detect_color_and_play_note():
     # Match a color from sensor measurement
     color = COLOR_CLASSIFIER.classify()
