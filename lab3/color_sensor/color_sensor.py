@@ -2,7 +2,7 @@ import math
 from pathlib import Path
 from threading import Thread
 from time import sleep
-from typing import Union
+from typing import Dict, Optional, Tuple, Union
 
 from utils.brick import EV3ColorSensor
 
@@ -10,7 +10,7 @@ from utils.brick import EV3ColorSensor
 class ColorSensor:
     sensor: EV3ColorSensor
     current_color: str
-    cache: dict[str, tuple[float, float, float]] = {}
+    cache: Dict[str, Tuple[float, float, float]] = {}
     thread: Thread
     thread_run: bool = True
 
@@ -25,13 +25,14 @@ class ColorSensor:
     MARKER_DISTANCE_THRESHOLD = 0.18
     BLACK_BRIGHTNESS = 18.0
     WHITE_BRIGHTNESS = 140.0
+    INTERSECTION_RATIO_THRESHOLD = 0.18
 
     def __init__(self, sensor: EV3ColorSensor):
         print("initializing color sensor")
         self.sensor = sensor
         self.current_color = "UNKNOWN"
-        self.current_rgb: tuple[float, float, float] = (0.0, 0.0, 0.0)
-        self.current_normalized_rgb: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self.current_rgb: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self.current_normalized_rgb: Tuple[float, float, float] = (0.0, 0.0, 0.0)
         self.init_cache()
 
         self.thread = Thread(target=self.main, args=[])
@@ -53,7 +54,7 @@ class ColorSensor:
             if values is not None:
                 self.cache[color_name] = self.__normalize_rgb(values)
 
-    def _read_reference_file(self, file_path: Path) -> Union[tuple[float, float, float], None]:
+    def _read_reference_file(self, file_path: Path) -> Optional[Tuple[float, float, float]]:
         rows = [row.strip() for row in file_path.read_text().splitlines() if row.strip()]
         if not rows:
             return None
@@ -73,18 +74,18 @@ class ColorSensor:
             _ = self.__detect_color()
             sleep(0.01)
 
-    def get_rgb(self) -> tuple[float, float, float]:
+    def get_rgb(self) -> Tuple[float, float, float]:
         r, g, b = self.sensor.get_rgb()
         return r, g, b
 
-    def __set_rgb_color(self, rgb: tuple[float, float, float], color: str):
+    def __set_rgb_color(self, rgb: Tuple[float, float, float], color: str):
         self.current_rgb = rgb
         self.current_normalized_rgb = self.__normalize_rgb(rgb)
         self.current_color = color
 
     def __normalize_rgb(
-        self, rgb: tuple[float, float, float]
-    ) -> tuple[float, float, float]:
+        self, rgb: Tuple[float, float, float]
+    ) -> Tuple[float, float, float]:
         total = sum(rgb)
         if total <= 0:
             return (0.0, 0.0, 0.0)
@@ -101,12 +102,12 @@ class ColorSensor:
     def __handle_threshold(self, color: str):
         return color
 
-    def get_brightness(self, rgb: Union[tuple[float, float, float], None] = None) -> float:
+    def get_brightness(self, rgb: Optional[Tuple[float, float, float]] = None) -> float:
         if rgb is None:
             rgb = self.current_rgb
         return sum(rgb) / 3.0
 
-    def get_distance(self, rgb: tuple[float, float, float], target_color: str) -> float:
+    def get_distance(self, rgb: Tuple[float, float, float], target_color: str) -> float:
         if target_color not in self.cache:
             return -1.0
         rr, gg, bb = self.cache[target_color]
@@ -114,7 +115,7 @@ class ColorSensor:
         dist = math.sqrt((nr - rr) ** 2 + (ng - gg) ** 2 + (nb - bb) ** 2)
         return dist
 
-    def classify_color(self, rgb: tuple[float, float, float]) -> str:
+    def classify_color(self, rgb: Tuple[float, float, float]) -> str:
         brightness = self.get_brightness(rgb)
         if brightness <= self.BLACK_BRIGHTNESS:
             return "BLACK"
@@ -149,13 +150,13 @@ class ColorSensor:
     def get_current_color(self) -> str:
         return self.current_color
 
-    def get_current_rgb(self) -> tuple[float, float, float]:
+    def get_current_rgb(self) -> Tuple[float, float, float]:
         return self.current_rgb
 
-    def get_current_normalized_rgb(self) -> tuple[float, float, float]:
+    def get_current_normalized_rgb(self) -> Tuple[float, float, float]:
         return self.current_normalized_rgb
 
-    def get_line_ratio(self, rgb: Union[tuple[float, float, float], None] = None) -> float:
+    def get_line_ratio(self, rgb: Optional[Tuple[float, float, float]] = None) -> float:
         brightness = self.get_brightness(rgb)
         span = self.WHITE_BRIGHTNESS - self.BLACK_BRIGHTNESS
         if span <= 0:
@@ -165,26 +166,35 @@ class ColorSensor:
         return max(0.0, min(1.0, ratio))
 
     def get_line_error(
-        self, rgb: Union[tuple[float, float, float], None] = None, target_ratio: float = 0.45
+        self, rgb: Optional[Tuple[float, float, float]] = None, target_ratio: float = 0.45
     ) -> float:
         return target_ratio - self.get_line_ratio(rgb)
 
     def sees_line(
         self,
-        rgb: Union[tuple[float, float, float], None] = None,
-        color: Union[str, None] = None,
+        rgb: Optional[Tuple[float, float, float]] = None,
+        color: Optional[str] = None,
     ) -> bool:
         if color is None:
             color = self.current_color
         return self.get_line_ratio(rgb) < 0.8 and not self.is_route_marker(color)
 
-    def is_route_marker(self, color: Union[str, None] = None) -> bool:
+    def is_route_marker(self, color: Optional[str] = None) -> bool:
         if color is None:
             color = self.current_color
         return color in {"BLUE", "YELLOW", "ORANGE"}
 
+    def is_intersection_candidate(
+        self,
+        rgb: Optional[Tuple[float, float, float]] = None,
+        color: Optional[str] = None,
+    ) -> bool:
+        if color is None:
+            color = self.current_color
+        return color == "BLACK" or self.get_line_ratio(rgb) <= self.INTERSECTION_RATIO_THRESHOLD
+
     def get_ratio(
-        self, rgb: tuple[float, float, float], target1: str, target2: str
+        self, rgb: Tuple[float, float, float], target1: str, target2: str
     ) -> float:
         if target1 == "BLACK" and target2 == "WHITE":
             return self.get_line_ratio(rgb)

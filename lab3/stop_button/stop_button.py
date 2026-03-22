@@ -1,7 +1,7 @@
 import math
 from threading import Thread
 from time import sleep
-from typing import Union
+from typing import Callable, Optional, Union
 from utils.brick import TouchSensor
 import os, signal
 
@@ -12,16 +12,22 @@ class StopButton:
     thread: Thread
     thread_run: bool = True
 
-    def __init__(self, sensor: TouchSensor):
+    def __init__(
+        self,
+        sensor: TouchSensor,
+        on_press: Optional[Callable[[], None]] = None,
+    ):
         print("initializing stop button")
         self.sensor = sensor
+        self.on_press = on_press
         self.thread = Thread(target=self.main, args=[])
         self.thread.start()
 
     def main(self):
         while self.thread_run:
             if(self.sensor.is_pressed()):
-                # self.was_pressed = True
+                if self.on_press is not None:
+                    self.on_press()
                 os.kill(os.getpid(), signal.SIGINT)
             sleep(0.01)
 
