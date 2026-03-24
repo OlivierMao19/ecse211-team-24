@@ -24,10 +24,12 @@ class ColorSensor:
     }
     MARKER_DISTANCE_THRESHOLD = 0.18
     BED_DISTANCE_THRESHOLD = 0.38
-    YELLOW_DISTANCE_THRESHOLD = 0.14
+    YELLOW_DISTANCE_THRESHOLD = 0.10
     GREEN_DISTANCE_THRESHOLD = 0.12
-    BLACK_BRIGHTNESS = 10.0
-    DARK_SUM_THRESHOLD = 45.0
+    YELLOW_MIN_BRIGHTNESS = 140.0
+    GREEN_MIN_BRIGHTNESS = 60.0
+    BLACK_BRIGHTNESS = 18.0
+    DARK_SUM_THRESHOLD = 60.0
     WHITE_BRIGHTNESS = 260.0
     INTERSECTION_RATIO_THRESHOLD = 0.18
 
@@ -136,11 +138,23 @@ class ColorSensor:
                 closest_dist = dist
                 color_found = name
 
-        if color_found == "YELLOW" and closest_dist <= self.YELLOW_DISTANCE_THRESHOLD:
+        if (
+            color_found == "YELLOW"
+            and brightness >= self.YELLOW_MIN_BRIGHTNESS
+            and closest_dist <= self.YELLOW_DISTANCE_THRESHOLD
+        ):
             return color_found
+        if color_found == "YELLOW":
+            return "UNKNOWN"
 
-        if color_found == "GREEN" and closest_dist <= self.GREEN_DISTANCE_THRESHOLD:
+        if (
+            color_found == "GREEN"
+            and brightness >= self.GREEN_MIN_BRIGHTNESS
+            and closest_dist <= self.GREEN_DISTANCE_THRESHOLD
+        ):
             return color_found
+        if color_found == "GREEN":
+            return "UNKNOWN"
 
         if color_found == "RED" and closest_dist <= self.BED_DISTANCE_THRESHOLD:
             return color_found
