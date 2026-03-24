@@ -15,7 +15,9 @@ for path in (str(LAB3_DIR), str(PROJECT_DIR)):
 
 from color_sensor.color_sensor import ColorSensor
 from gyro_sensor.gyro_sensor import GyroSensor
+from room_scan.room_scan import RoomScanner
 from robot_movement.robot_movement import RobotMovement
+from sound.robot_sound import RobotSound
 from stop_button.stop_button import StopButton
 from utils.brick import (
     EV3ColorSensor,
@@ -37,11 +39,11 @@ STOP_SENSOR_PORT: Optional[int] = 3
 DEBUG_SENSOR_INIT = True
 
 DRIVE_POWER = 30
-TURN_POWER = 18
-ROOM_APPROACH_POWER = 18
-ROOM_SCAN_POWER = 14
+TURN_POWER = 14
+ROOM_APPROACH_POWER = DRIVE_POWER
+ROOM_SCAN_POWER = DRIVE_POWER
 STRAIGHT_LEFT_TRIM = 0.0
-STRAIGHT_RIGHT_TRIM = 0.0
+STRAIGHT_RIGHT_TRIM = 2.5
 DEGREE_UNIT = 700
 HEADING_GAIN = 1.4
 MAX_HEADING_CORRECTION = 6.0
@@ -52,6 +54,13 @@ GYRO_SETTLE_TOLERANCE_DEG = 2.0
 ROOM_SCAN_PRINT_EVERY_DEGREES = 140
 ROOM_COLOR_CONFIRM_SAMPLES = 2
 ROOM_SCAN_MAX_MULTIPLIER = 1.5
+ROOM_SWEEP_LEFT_ARC_DEGREES = 180
+ROOM_SWEEP_RIGHT_ARC_DEGREES = 220
+ROOM_SWEEP_STEP_DEGREES = 180
+ROOM_SWEEP_OUTER_POWER = DRIVE_POWER
+ROOM_SWEEP_INNER_POWER = 22
+ROOM_SWEEP_LEFT_TRIM = 0.0
+ROOM_SWEEP_RIGHT_TRIM = 3.0
 
 # "drive" uses DEGREE_UNIT * value.
 # Positive = forward, negative = backward.
@@ -107,140 +116,7 @@ def build_robot() -> Tuple[RobotMovement, ColorSensor, Optional[StopButton]]:
     return robot_movement, color_sensor, stop_button
 
 
-def wait_for_color(
-    color_sensor: ColorSensor,
-    target_colors: Tuple[str, ...],
-    consecutive_samples: int,
-    current_streak_color: Optional[str],
-    current_streak_count: int,
-) -> Tuple[bool, Optional[str], int]:
-    current_color = color_sensor.get_current_color()
-    if current_color == current_streak_color:
-        current_streak_count += 1
-    else:
-        current_streak_color = current_color
-        current_streak_count = 1
-
-    matched = (
-        current_streak_color in target_colors
-        and current_streak_count >= consecutive_samples
-    )
-    return matched, current_streak_color, current_streak_count
-
-
-def print_color_measurement(prefix: str, color_sensor: ColorSensor):
-    rgb = color_sensor.get_current_rgb()
-    color = color_sensor.get_current_color()
-    print(
-        "%s rgb=(%.1f, %.1f, %.1f) detected=%s"
-        % (prefix, rgb[0], rgb[1], rgb[2], color)
-    )
-
-
-def scan_room(
-    robot_movement: RobotMovement,
-    color_sensor: ColorSensor,
-    value: float,
-):
-    max_room_entry_degrees = DEGREE_UNIT * value
-    print(
-        "Room approach: driving until yellow for up to %.0f motor degrees"
-        % max_room_entry_degrees
-    )
-
-    robot_movement.reset_drive_reference()
-    robot_movement.start_heading_hold()
-
-    phase = "search_yellow"
-    streak_color = None
-    streak_count = 0
-    detected_bed_color = None
-    last_reported_bucket = -1
-    max_scan_degrees = DEGREE_UNIT * ROOM_SCAN_MAX_MULTIPLIER
-
-    while True:
-        if phase == "search_yellow":
-            if abs(robot_movement.get_average_encoder()) >= max_room_entry_degrees:
-                break
-
-            robot_movement.adjust_heading_hold(ROOM_APPROACH_POWER)
-            print_color_measurement("Room approach:", color_sensor)
-            found_yellow, streak_color, streak_count = wait_for_color(
-                color_sensor,
-                ("YELLOW",),
-                ROOM_COLOR_CONFIRM_SAMPLES,
-                streak_color,
-                streak_count,
-            )
-            if found_yellow:
-                yellow_position = abs(robot_movement.get_average_encoder())
-                print(
-                    "Room approach: detected YELLOW at %.0f motor degrees"
-                    % yellow_position
-                )
-                robot_movement.reset_drive_reference()
-                robot_movement.start_heading_hold()
-                streak_color = None
-                streak_count = 0
-                phase = "search_bed"
-            continue
-
-        if abs(robot_movement.get_average_encoder()) >= max_scan_degrees:
-            break
-
-        robot_movement.adjust_heading_hold(ROOM_SCAN_POWER)
-        travelled_since_yellow = abs(robot_movement.get_average_encoder())
-        print_color_measurement("Room scan:", color_sensor)
-        report_bucket = int(travelled_since_yellow / ROOM_SCAN_PRINT_EVERY_DEGREES)
-        if report_bucket > last_reported_bucket:
-            print(
-                "Room scan: %.0f degrees since yellow, color=%s"
-                % (travelled_since_yellow, color_sensor.get_current_color())
-            )
-            last_reported_bucket = report_bucket
-
-        found_bed_color, streak_color, streak_count = wait_for_color(
-            color_sensor,
-            ("GREEN", "RED"),
-            ROOM_COLOR_CONFIRM_SAMPLES,
-            streak_color,
-            streak_count,
-        )
-        if found_bed_color:
-            detected_bed_color = streak_color
-            break
-
-    robot_movement.stop_move()
-
-    if phase == "search_yellow":
-        print("Room approach: yellow not detected, continuing mission")
-        return
-
-    travelled_since_yellow = abs(robot_movement.get_average_encoder())
-
-    if detected_bed_color is None:
-        print(
-            "Room scan: no GREEN or RED found within %.0f motor degrees"
-            % max_scan_degrees
-        )
-    else:
-        print(
-            "Room scan: detected %s after %.0f motor degrees"
-            % (detected_bed_color, travelled_since_yellow)
-        )
-
-    if travelled_since_yellow > 0:
-        print(
-            "Room scan: backing up %.0f motor degrees to return from yellow scan"
-            % travelled_since_yellow
-        )
-        robot_movement.drive_motor_degrees_heading(
-            -travelled_since_yellow,
-            ROOM_APPROACH_POWER,
-        )
-
-
-def run_mission(robot_movement: RobotMovement, color_sensor: ColorSensor):
+def run_mission(robot_movement: RobotMovement, room_scanner: RoomScanner):
     for index, (action, value) in enumerate(MISSION_STEPS, start=1):
         if action == "drive":
             motor_degrees = DEGREE_UNIT * value
@@ -254,7 +130,7 @@ def run_mission(robot_movement: RobotMovement, color_sensor: ColorSensor):
 
         if action == "room":
             print("Step %d: enter room and scan for bed color" % index)
-            scan_room(robot_movement, color_sensor, value)
+            room_scanner.scan_room(DEGREE_UNIT * value)
             continue
 
         if action == "turn":
@@ -263,7 +139,7 @@ def run_mission(robot_movement: RobotMovement, color_sensor: ColorSensor):
                 "Step %d: turn %s for %.0f degrees"
                 % (index, direction, abs(90 * value))
             )
-            robot_movement.pivot_turn_gyro(90 * value, TURN_POWER)
+            robot_movement.pivot_turn_gyro(85 * value, TURN_POWER)
             continue
 
         raise ValueError("Unsupported action: %s" % action)
@@ -272,10 +148,30 @@ def run_mission(robot_movement: RobotMovement, color_sensor: ColorSensor):
 def main():
     robot_movement = None
     color_sensor = None
+    room_scanner = None
+    robot_sound = None
     stop_button = None
 
     try:
         robot_movement, color_sensor, stop_button = build_robot()
+        robot_sound = RobotSound()
+        room_scanner = RoomScanner(
+            robot_movement=robot_movement,
+            color_sensor=color_sensor,
+            room_approach_power=ROOM_APPROACH_POWER,
+            room_scan_power=ROOM_SCAN_POWER,
+            room_color_confirm_samples=ROOM_COLOR_CONFIRM_SAMPLES,
+            room_scan_print_every_degrees=ROOM_SCAN_PRINT_EVERY_DEGREES,
+            room_scan_max_degrees=DEGREE_UNIT * ROOM_SCAN_MAX_MULTIPLIER,
+            sweep_left_arc_degrees=ROOM_SWEEP_LEFT_ARC_DEGREES,
+            sweep_right_arc_degrees=ROOM_SWEEP_RIGHT_ARC_DEGREES,
+            sweep_step_degrees=ROOM_SWEEP_STEP_DEGREES,
+            sweep_outer_power=ROOM_SWEEP_OUTER_POWER,
+            sweep_inner_power=ROOM_SWEEP_INNER_POWER,
+            sweep_left_trim=ROOM_SWEEP_LEFT_TRIM,
+            sweep_right_trim=ROOM_SWEEP_RIGHT_TRIM,
+            robot_sound=robot_sound,
+        )
         print("Keep the robot still while the gyro settles")
         if not robot_movement.wait_for_gyro_settle(
             GYRO_SETTLE_SECONDS,
@@ -283,7 +179,7 @@ def main():
         ):
             raise RuntimeError("Gyro did not settle. Restart with robot kept still.")
         print("Starting hard-coded mission")
-        run_mission(robot_movement, color_sensor)
+        run_mission(robot_movement, room_scanner)
         print("Mission finished")
     except KeyboardInterrupt:
         if robot_movement is not None:

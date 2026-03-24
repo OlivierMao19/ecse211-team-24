@@ -1,0 +1,297 @@
+from time import sleep
+from typing import Optional, Tuple
+
+from color_sensor.color_sensor import ColorSensor
+from robot_movement.robot_movement import RobotMovement
+from sound.robot_sound import RobotSound
+
+
+class RoomScanner:
+    def __init__(
+        self,
+        robot_movement: RobotMovement,
+        color_sensor: ColorSensor,
+        room_approach_power: float,
+        room_scan_power: float,
+        room_color_confirm_samples: int,
+        room_scan_print_every_degrees: float,
+        room_scan_max_degrees: float,
+        sweep_left_arc_degrees: float,
+        sweep_right_arc_degrees: float,
+        sweep_step_degrees: float,
+        sweep_outer_power: float,
+        sweep_inner_power: float,
+        sweep_left_trim: float = 0.0,
+        sweep_right_trim: float = 0.0,
+        robot_sound: Optional[RobotSound] = None,
+    ):
+        self.robot_movement = robot_movement
+        self.color_sensor = color_sensor
+        self.room_approach_power = room_approach_power
+        self.room_scan_power = room_scan_power
+        self.room_color_confirm_samples = room_color_confirm_samples
+        self.room_scan_print_every_degrees = room_scan_print_every_degrees
+        self.room_scan_max_degrees = room_scan_max_degrees
+        self.sweep_left_arc_degrees = sweep_left_arc_degrees
+        self.sweep_right_arc_degrees = sweep_right_arc_degrees
+        self.sweep_step_degrees = sweep_step_degrees
+        self.sweep_outer_power = sweep_outer_power
+        self.sweep_inner_power = sweep_inner_power
+        self.sweep_left_trim = sweep_left_trim
+        self.sweep_right_trim = sweep_right_trim
+        self.robot_sound = robot_sound
+
+    def scan_room(self, max_room_entry_degrees: float):
+        print(
+            "Room approach: driving until yellow for up to %.0f motor degrees"
+            % max_room_entry_degrees
+        )
+
+        self.robot_movement.reset_drive_reference()
+        self.robot_movement.start_heading_hold()
+
+        streak_color = None
+        streak_count = 0
+
+        while abs(self.robot_movement.get_average_encoder()) < max_room_entry_degrees:
+            self.robot_movement.adjust_heading_hold(self.room_approach_power)
+            self._print_color_measurement("Room approach:")
+            found_yellow, streak_color, streak_count = self._wait_for_color(
+                ("YELLOW",),
+                streak_color,
+                streak_count,
+            )
+            if found_yellow:
+                yellow_position = abs(self.robot_movement.get_average_encoder())
+                print(
+                    "Room approach: detected YELLOW at %.0f motor degrees"
+                    % yellow_position
+                )
+                self.robot_movement.stop_move()
+                return self._sweep_for_bed()
+
+            sleep(0.01)
+
+        self.robot_movement.stop_move()
+        print("Room approach: yellow not detected, continuing mission")
+        return None
+
+    def _sweep_for_bed(self):
+        forward_progress = 0.0
+
+        while forward_progress < self.room_scan_max_degrees:
+            detected_color = self._scan_arc("left")
+            if detected_color is not None:
+                self._play_detected_color_sound(detected_color)
+                self._back_to_yellow(forward_progress)
+                return detected_color
+
+            detected_color = self._scan_arc("right")
+            if detected_color is not None:
+                self._play_detected_color_sound(detected_color)
+                self._back_to_yellow(forward_progress)
+                return detected_color
+
+            remaining_progress = self.room_scan_max_degrees - forward_progress
+            step_degrees = min(self.sweep_step_degrees, remaining_progress)
+            detected_color, travelled = self._scan_straight_step(step_degrees)
+            forward_progress += travelled
+            if detected_color is not None:
+                self._play_detected_color_sound(detected_color)
+                self._back_to_yellow(forward_progress)
+                return detected_color
+
+        print(
+            "Room scan: no GREEN or RED found within %.0f motor degrees"
+            % self.room_scan_max_degrees
+        )
+        if forward_progress > 0:
+            self._back_to_yellow(forward_progress)
+        return None
+
+    def _scan_arc(self, side: str) -> Optional[str]:
+        label = "Room scan: curved %s" % side
+        if side == "left":
+            left_power = self.sweep_inner_power
+            right_power = self.sweep_outer_power
+            target_degrees = self.sweep_left_arc_degrees
+        else:
+            left_power = self.sweep_outer_power
+            right_power = self.sweep_inner_power
+            target_degrees = self.sweep_right_arc_degrees
+
+        detected_color, travelled = self._run_segment_with_detection(
+            left_power,
+            right_power,
+            target_degrees,
+            label,
+        )
+
+        self._run_segment_without_detection(
+            -left_power,
+            -right_power,
+            travelled,
+            "Room scan: backing out of curved %s sweep" % side,
+        )
+        return detected_color
+
+    def _scan_straight_step(self, motor_degrees: float) -> Tuple[Optional[str], float]:
+        print("Room scan: advancing forward %.0f motor degrees" % motor_degrees)
+        self.robot_movement.reset_drive_reference()
+        self.robot_movement.start_heading_hold()
+        streak_color = None
+        streak_count = 0
+        last_reported_bucket = -1
+
+        while abs(self.robot_movement.get_average_encoder()) < motor_degrees:
+            self.robot_movement.adjust_heading_hold(self.room_scan_power)
+            travelled = abs(self.robot_movement.get_average_encoder())
+            self._print_color_measurement("Room scan:")
+            report_bucket = int(
+                travelled / self.room_scan_print_every_degrees
+            )
+            if report_bucket > last_reported_bucket:
+                print(
+                    "Room scan: %.0f degrees into forward step, color=%s"
+                    % (travelled, self.color_sensor.get_current_color())
+                )
+                last_reported_bucket = report_bucket
+
+            found_bed_color, streak_color, streak_count = self._wait_for_color(
+                ("GREEN", "RED"),
+                streak_color,
+                streak_count,
+            )
+            if found_bed_color:
+                self.robot_movement.stop_move()
+                print(
+                    "Room scan: detected %s after %.0f motor degrees"
+                    % (streak_color, travelled)
+                )
+                return streak_color, travelled
+
+            sleep(0.01)
+
+        self.robot_movement.stop_move()
+        return None, abs(self.robot_movement.get_average_encoder())
+
+    def _run_segment_with_detection(
+        self,
+        left_power: float,
+        right_power: float,
+        target_degrees: float,
+        label: str,
+    ) -> Tuple[Optional[str], float]:
+        self.robot_movement.reset_drive_reference()
+        streak_color = None
+        streak_count = 0
+
+        while abs(self.robot_movement.get_average_encoder()) < target_degrees:
+            trimmed_left, trimmed_right = self._get_sweep_trimmed_powers(
+                left_power,
+                right_power,
+            )
+            self.robot_movement.adjust_speed(trimmed_left, trimmed_right)
+            travelled = abs(self.robot_movement.get_average_encoder())
+            self._print_color_measurement(label)
+            found_bed_color, streak_color, streak_count = self._wait_for_color(
+                ("GREEN", "RED"),
+                streak_color,
+                streak_count,
+            )
+            if found_bed_color:
+                self.robot_movement.stop_move()
+                print(
+                    "%s detected %s after %.0f motor degrees"
+                    % (label, streak_color, travelled)
+                )
+                return streak_color, travelled
+
+            sleep(0.01)
+
+        self.robot_movement.stop_move()
+        return None, abs(self.robot_movement.get_average_encoder())
+
+    def _run_segment_without_detection(
+        self,
+        left_power: float,
+        right_power: float,
+        target_degrees: float,
+        label: str,
+    ):
+        if target_degrees <= 0:
+            return
+
+        print("%s for %.0f motor degrees" % (label, target_degrees))
+        self.robot_movement.reset_drive_reference()
+        while abs(self.robot_movement.get_average_encoder()) < target_degrees:
+            trimmed_left, trimmed_right = self._get_sweep_trimmed_powers(
+                left_power,
+                right_power,
+            )
+            self.robot_movement.adjust_speed(trimmed_left, trimmed_right)
+            sleep(0.01)
+        self.robot_movement.stop_move()
+
+    def _back_to_yellow(self, travelled_since_yellow: float):
+        if travelled_since_yellow <= 0:
+            return
+
+        print(
+            "Room scan: backing up %.0f motor degrees to return from yellow scan"
+            % travelled_since_yellow
+        )
+        self.robot_movement.drive_motor_degrees_heading(
+            -travelled_since_yellow,
+            self.room_approach_power,
+        )
+
+    def _wait_for_color(
+        self,
+        target_colors: Tuple[str, ...],
+        current_streak_color: Optional[str],
+        current_streak_count: int,
+    ) -> Tuple[bool, Optional[str], int]:
+        current_color = self.color_sensor.get_current_color()
+        if current_color == current_streak_color:
+            current_streak_count += 1
+        else:
+            current_streak_color = current_color
+            current_streak_count = 1
+
+        matched = (
+            current_streak_color in target_colors
+            and current_streak_count >= self.room_color_confirm_samples
+        )
+        return matched, current_streak_color, current_streak_count
+
+    def _print_color_measurement(self, prefix: str):
+        rgb = self.color_sensor.get_current_rgb()
+        color = self.color_sensor.get_current_color()
+        print(
+            "%s rgb=(%.1f, %.1f, %.1f) detected=%s"
+            % (prefix, rgb[0], rgb[1], rgb[2], color)
+        )
+
+    def _play_detected_color_sound(self, detected_color: str):
+        if detected_color != "GREEN" or self.robot_sound is None:
+            return
+        print("Room scan: GREEN detected, playing beep")
+        self.robot_sound.play_green_detected()
+
+    def _get_sweep_trimmed_powers(
+        self,
+        left_power: float,
+        right_power: float,
+    ) -> Tuple[float, float]:
+        trimmed_left = left_power + self._signed_trim(left_power, self.sweep_left_trim)
+        trimmed_right = right_power + self._signed_trim(
+            right_power,
+            self.sweep_right_trim,
+        )
+        return trimmed_left, trimmed_right
+
+    def _signed_trim(self, power: float, trim: float) -> float:
+        if power == 0 or trim == 0:
+            return 0.0
+        return trim if power > 0 else -trim
