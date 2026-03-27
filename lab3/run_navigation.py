@@ -16,6 +16,7 @@ for path in (str(LAB3_DIR), str(PROJECT_DIR)):
 from color_sensor.color_sensor import ColorSensor
 from gyro_sensor.gyro_sensor import GyroSensor
 from package_pickup.pickup_controller import PickupController
+from package_pickup.pickup_sequence import run_pickup_sequence
 from room_scan.room_scan import RoomScanner
 from robot_movement.robot_movement import RobotMovement
 from sound.robot_sound import RobotSound
@@ -38,6 +39,8 @@ LEFT_PICKUP_MOTOR_PORT = "A"
 RIGHT_PICKUP_MOTOR_PORT = "D"
 LEFT_PICKUP_SIGN = 1
 RIGHT_PICKUP_SIGN = 1
+PICKUP_POWER_LIMIT = 45
+PICKUP_DPS_LIMIT = 260
 GYRO_SENSOR_PORT = 3
 COLOR_SENSOR_PORT = 2
 STOP_SENSOR_PORT: Optional[int] = 1
@@ -59,17 +62,18 @@ GYRO_SETTLE_TOLERANCE_DEG = 2.0
 ROOM_SCAN_PRINT_EVERY_DEGREES = 140
 ROOM_COLOR_CONFIRM_SAMPLES = 2
 ROOM_SCAN_MAX_MULTIPLIER = 1.5
-ROOM_SWEEP_LEFT_ARC_DEGREES = 180
-ROOM_SWEEP_RIGHT_ARC_DEGREES = 220
+ROOM_SWEEP_LEFT_ARC_DEGREES = 210
+ROOM_SWEEP_RIGHT_ARC_DEGREES = 250
 ROOM_SWEEP_STEP_DEGREES = 180
 ROOM_SWEEP_OUTER_POWER = DRIVE_POWER
 ROOM_SWEEP_INNER_POWER = 22
 ROOM_SWEEP_LEFT_TRIM = 0.0
-ROOM_SWEEP_RIGHT_TRIM = 3.0
-ROOM_DROPOFF_ROTATE_DEGREES = -180
+ROOM_SWEEP_RIGHT_TRIM = 2.0
+ROOM_DROPOFF_LEFT_ROTATE_DEGREES = -180
+ROOM_DROPOFF_RIGHT_ROTATE_DEGREES = -180
 ROOM_DROPOFF_APPROACH_DEGREES = 45
 ROOM_DROPOFF_RETURN_RATIO = 0.33
-ROOM_DROPOFF_PAUSE_S = 0.4
+ROOM_DROPOFF_PAUSE_S = 3.0
 EXTRA_ROOM_LINK_MULTIPLIER = 360.0 / DEGREE_UNIT
 FINAL_RETURN_FORWARD_MULTIPLIER = 1.3
 FINAL_RETURN_MAIN_MULTIPLIER = 2.0 + EXTRA_ROOM_LINK_MULTIPLIER
@@ -136,6 +140,8 @@ def build_robot() -> Tuple[
         right_pickup_motor,
         left_sign=LEFT_PICKUP_SIGN,
         right_sign=RIGHT_PICKUP_SIGN,
+        power_limit=PICKUP_POWER_LIMIT,
+        dps_limit=PICKUP_DPS_LIMIT,
     )
     stop_button = (
         StopButton(stop_button_sensor, on_press=robot_movement.stop_move)
@@ -202,7 +208,8 @@ def main():
             sweep_right_trim=ROOM_SWEEP_RIGHT_TRIM,
             robot_sound=robot_sound,
             pickup_controller=pickup_controller,
-            dropoff_rotate_degrees=ROOM_DROPOFF_ROTATE_DEGREES,
+            dropoff_left_rotate_degrees=ROOM_DROPOFF_LEFT_ROTATE_DEGREES,
+            dropoff_right_rotate_degrees=ROOM_DROPOFF_RIGHT_ROTATE_DEGREES,
             dropoff_return_ratio=ROOM_DROPOFF_RETURN_RATIO,
             dropoff_approach_degrees=ROOM_DROPOFF_APPROACH_DEGREES,
             dropoff_pause_s=ROOM_DROPOFF_PAUSE_S,
@@ -213,6 +220,8 @@ def main():
             GYRO_SETTLE_TOLERANCE_DEG,
         ):
             raise RuntimeError("Gyro did not settle. Restart with robot kept still.")
+        print("Starting pickup sequence")
+        run_pickup_sequence(robot_movement, pickup_controller)
         print("Starting hard-coded mission")
         run_mission(robot_movement, room_scanner)
         print("Mission finished")

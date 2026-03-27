@@ -26,7 +26,8 @@ class RoomScanner:
         sweep_right_trim: float = 0.0,
         robot_sound: Optional[RobotSound] = None,
         pickup_controller: Optional[PickupController] = None,
-        dropoff_rotate_degrees: float = -180.0,
+        dropoff_left_rotate_degrees: float = -180.0,
+        dropoff_right_rotate_degrees: float = 180.0,
         dropoff_return_ratio: float = 0.33,
         dropoff_approach_degrees: float = 45.0,
         dropoff_pause_s: float = 0.4,
@@ -47,7 +48,8 @@ class RoomScanner:
         self.sweep_right_trim = sweep_right_trim
         self.robot_sound = robot_sound
         self.pickup_controller = pickup_controller
-        self.dropoff_rotate_degrees = dropoff_rotate_degrees
+        self.dropoff_left_rotate_degrees = dropoff_left_rotate_degrees
+        self.dropoff_right_rotate_degrees = dropoff_right_rotate_degrees
         self.dropoff_return_ratio = dropoff_return_ratio
         self.dropoff_approach_degrees = dropoff_approach_degrees
         self.dropoff_pause_s = dropoff_pause_s
@@ -96,12 +98,14 @@ class RoomScanner:
                 self._handle_arc_detection("left", detected_color, travelled)
                 self._back_to_yellow(forward_progress)
                 return detected_color
+            self._return_from_arc("left", travelled)
 
             detected_color, travelled = self._scan_arc("right")
             if detected_color is not None:
                 self._handle_arc_detection("right", detected_color, travelled)
                 self._back_to_yellow(forward_progress)
                 return detected_color
+            self._return_from_arc("right", travelled)
 
             remaining_progress = self.room_scan_max_degrees - forward_progress
             step_degrees = min(self.sweep_step_degrees, remaining_progress)
@@ -255,12 +259,7 @@ class RoomScanner:
         detected_color: str,
         travelled: float,
     ):
-        if side == "left":
-            return_left_power = -self.sweep_inner_power
-            return_right_power = -self.sweep_outer_power
-        else:
-            return_left_power = -self.sweep_outer_power
-            return_right_power = -self.sweep_inner_power
+        return_left_power, return_right_power = self._get_return_powers(side)
 
         if detected_color == "GREEN":
             dropoff_degrees = travelled * self.dropoff_return_ratio
@@ -315,6 +314,18 @@ class RoomScanner:
             "Room scan: backing out of curved %s sweep" % side,
         )
 
+    def _return_from_arc(self, side: str, travelled: float):
+        if travelled <= 0:
+            return
+
+        return_left_power, return_right_power = self._get_return_powers(side)
+        self._run_segment_without_detection(
+            return_left_power,
+            return_right_power,
+            travelled,
+            "Room scan: backing out of curved %s sweep" % side,
+        )
+
     def _wait_for_color(
         self,
         target_colors: Tuple[str, ...],
@@ -352,14 +363,18 @@ class RoomScanner:
         if self.pickup_controller is None:
             return
 
+        rotate_degrees = self.dropoff_left_rotate_degrees
+        if side != "left":
+            rotate_degrees = self.dropoff_right_rotate_degrees
+
         print(
             "Room scan: releasing %s cube with %.0f motor degrees"
-            % (side, abs(self.dropoff_rotate_degrees))
+            % (side, abs(rotate_degrees))
         )
         if side == "left":
-            self.pickup_controller.rotate_left_relative(self.dropoff_rotate_degrees)
+            self.pickup_controller.rotate_left_relative(rotate_degrees)
             return
-        self.pickup_controller.rotate_right_relative(self.dropoff_rotate_degrees)
+        self.pickup_controller.rotate_right_relative(rotate_degrees)
 
     def _get_sweep_trimmed_powers(
         self,
@@ -377,3 +392,8 @@ class RoomScanner:
         if power == 0 or trim == 0:
             return 0.0
         return trim if power > 0 else -trim
+
+    def _get_return_powers(self, side: str) -> Tuple[float, float]:
+        if side == "left":
+            return -self.sweep_inner_power, -self.sweep_outer_power
+        return -self.sweep_outer_power, -self.sweep_inner_power

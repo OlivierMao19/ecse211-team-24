@@ -2,10 +2,11 @@
 
 from pathlib import Path
 import sys
+from time import sleep
 from typing import Optional, Tuple
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = Path(__file__).resolve().parents[3]
 LAB3_DIR = ROOT_DIR / "lab3"
 PROJECT_DIR = ROOT_DIR / "lab2-starter-code-team-24" / "project"
 
@@ -35,6 +36,8 @@ LEFT_PICKUP_MOTOR_PORT = "A"
 RIGHT_PICKUP_MOTOR_PORT = "D"
 LEFT_PICKUP_SIGN = 1
 RIGHT_PICKUP_SIGN = 1
+PICKUP_POWER_LIMIT = 45
+PICKUP_DPS_LIMIT = 260
 
 GYRO_SENSOR_PORT = 3
 STOP_SENSOR_PORT: Optional[int] = 1
@@ -51,9 +54,11 @@ TURN_SLOWDOWN_DEG = 16.0
 GYRO_SETTLE_SECONDS = 2.0
 GYRO_SETTLE_TOLERANCE_DEG = 2.0
 
-FORWARD_DEGREES = 700
-PICKUP_ROTATE_DEGREES = 180
-EXIT_TURN_DEG = -90
+FORWARD_DEGREES = 630
+BACKWARD_DEGREES = -400
+PICKUP_ROTATE_DEGREES = 100
+PICKUP_SETTLE_SECONDS = 0.6
+EXIT_TURN_DEG = -89
 
 
 def build_system() -> Tuple[RobotMovement, PickupController, Optional[StopButton]]:
@@ -86,6 +91,8 @@ def build_system() -> Tuple[RobotMovement, PickupController, Optional[StopButton
         right_pickup_motor,
         left_sign=LEFT_PICKUP_SIGN,
         right_sign=RIGHT_PICKUP_SIGN,
+        power_limit=PICKUP_POWER_LIMIT,
+        dps_limit=PICKUP_DPS_LIMIT,
     )
 
     stop_button = (
@@ -105,9 +112,14 @@ def run_pickup_sequence(
 
     print("Pickup step 2: close scoops")
     pickup_controller.rotate_relative(PICKUP_ROTATE_DEGREES)
-
+    print(
+        "Pickup step 2b: waiting %.1f s for pickup to settle"
+        % PICKUP_SETTLE_SECONDS
+    )
+    sleep(PICKUP_SETTLE_SECONDS)
+    
     print("Pickup step 3: back away from cubes")
-    robot_movement.drive_motor_degrees_heading(-FORWARD_DEGREES, DRIVE_POWER)
+    robot_movement.drive_motor_degrees_heading(BACKWARD_DEGREES, DRIVE_POWER)
 
     print("Pickup step 4: turn left to navigation start heading")
     robot_movement.pivot_turn_gyro(EXIT_TURN_DEG, TURN_POWER)
