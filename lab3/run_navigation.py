@@ -15,6 +15,7 @@ for path in (str(LAB3_DIR), str(PROJECT_DIR)):
 
 from color_sensor.color_sensor import ColorSensor
 from gyro_sensor.gyro_sensor import GyroSensor
+from package_pickup.pickup_controller import PickupController
 from room_scan.room_scan import RoomScanner
 from robot_movement.robot_movement import RobotMovement
 from sound.robot_sound import RobotSound
@@ -33,6 +34,10 @@ LEFT_MOTOR_PORT = "B"
 RIGHT_MOTOR_PORT = "C"
 LEFT_MOTOR_SIGN = -1
 RIGHT_MOTOR_SIGN = -1
+LEFT_PICKUP_MOTOR_PORT = "A"
+RIGHT_PICKUP_MOTOR_PORT = "D"
+LEFT_PICKUP_SIGN = 1
+RIGHT_PICKUP_SIGN = 1
 GYRO_SENSOR_PORT = 3
 COLOR_SENSOR_PORT = 2
 STOP_SENSOR_PORT: Optional[int] = 1
@@ -61,6 +66,10 @@ ROOM_SWEEP_OUTER_POWER = DRIVE_POWER
 ROOM_SWEEP_INNER_POWER = 22
 ROOM_SWEEP_LEFT_TRIM = 0.0
 ROOM_SWEEP_RIGHT_TRIM = 3.0
+ROOM_DROPOFF_ROTATE_DEGREES = -180
+ROOM_DROPOFF_APPROACH_DEGREES = 45
+ROOM_DROPOFF_RETURN_RATIO = 0.33
+ROOM_DROPOFF_PAUSE_S = 0.4
 
 # "drive" uses DEGREE_UNIT * value.
 # Positive = forward, negative = backward.
@@ -84,9 +93,16 @@ MISSION_STEPS: List[Tuple[str, float]] = [
 ]
 
 
-def build_robot() -> Tuple[RobotMovement, ColorSensor, Optional[StopButton]]:
+def build_robot() -> Tuple[
+    RobotMovement,
+    ColorSensor,
+    PickupController,
+    Optional[StopButton],
+]:
     left_motor = Motor(LEFT_MOTOR_PORT)
     right_motor = Motor(RIGHT_MOTOR_PORT)
+    left_pickup_motor = Motor(LEFT_PICKUP_MOTOR_PORT)
+    right_pickup_motor = Motor(RIGHT_PICKUP_MOTOR_PORT)
     base_color_sensor = EV3ColorSensor(COLOR_SENSOR_PORT)
     base_gyro_sensor = EV3GyroSensor(GYRO_SENSOR_PORT)
     stop_button_sensor = TouchSensor(STOP_SENSOR_PORT) if STOP_SENSOR_PORT else None
@@ -108,12 +124,18 @@ def build_robot() -> Tuple[RobotMovement, ColorSensor, Optional[StopButton]]:
     robot_movement.MAX_HEADING_CORRECTION = MAX_HEADING_CORRECTION
     robot_movement.TURN_SLOWDOWN_DEG = TURN_SLOWDOWN_DEG
     robot_movement.MIN_TURN_POWER = TURN_SLOW_POWER
+    pickup_controller = PickupController(
+        left_pickup_motor,
+        right_pickup_motor,
+        left_sign=LEFT_PICKUP_SIGN,
+        right_sign=RIGHT_PICKUP_SIGN,
+    )
     stop_button = (
         StopButton(stop_button_sensor, on_press=robot_movement.stop_move)
         if stop_button_sensor
         else None
     )
-    return robot_movement, color_sensor, stop_button
+    return robot_movement, color_sensor, pickup_controller, stop_button
 
 
 def run_mission(robot_movement: RobotMovement, room_scanner: RoomScanner):
@@ -148,12 +170,13 @@ def run_mission(robot_movement: RobotMovement, room_scanner: RoomScanner):
 def main():
     robot_movement = None
     color_sensor = None
+    pickup_controller = None
     room_scanner = None
     robot_sound = None
     stop_button = None
 
     try:
-        robot_movement, color_sensor, stop_button = build_robot()
+        robot_movement, color_sensor, pickup_controller, stop_button = build_robot()
         robot_sound = RobotSound()
         room_scanner = RoomScanner(
             robot_movement=robot_movement,
@@ -171,6 +194,11 @@ def main():
             sweep_left_trim=ROOM_SWEEP_LEFT_TRIM,
             sweep_right_trim=ROOM_SWEEP_RIGHT_TRIM,
             robot_sound=robot_sound,
+            pickup_controller=pickup_controller,
+            dropoff_rotate_degrees=ROOM_DROPOFF_ROTATE_DEGREES,
+            dropoff_return_ratio=ROOM_DROPOFF_RETURN_RATIO,
+            dropoff_approach_degrees=ROOM_DROPOFF_APPROACH_DEGREES,
+            dropoff_pause_s=ROOM_DROPOFF_PAUSE_S,
         )
         print("Keep the robot still while the gyro settles")
         if not robot_movement.wait_for_gyro_settle(
@@ -192,6 +220,8 @@ def main():
     finally:
         if robot_movement is not None:
             robot_movement.stop_move()
+        if pickup_controller is not None:
+            pickup_controller.stop()
         if color_sensor is not None:
             color_sensor.dispose()
         if stop_button is not None:
