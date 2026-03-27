@@ -2,6 +2,7 @@ from time import sleep
 from typing import Optional, Tuple
 
 from color_sensor.color_sensor import ColorSensor
+from package_pickup.pickup_controller import PickupController
 from robot_movement.robot_movement import RobotMovement
 from sound.robot_sound import RobotSound
 
@@ -24,6 +25,11 @@ class RoomScanner:
         sweep_left_trim: float = 0.0,
         sweep_right_trim: float = 0.0,
         robot_sound: Optional[RobotSound] = None,
+        pickup_controller: Optional[PickupController] = None,
+        dropoff_rotate_degrees: float = -180.0,
+        dropoff_return_ratio: float = 0.33,
+        dropoff_approach_degrees: float = 45.0,
+        dropoff_pause_s: float = 0.4,
     ):
         self.robot_movement = robot_movement
         self.color_sensor = color_sensor
@@ -40,6 +46,11 @@ class RoomScanner:
         self.sweep_left_trim = sweep_left_trim
         self.sweep_right_trim = sweep_right_trim
         self.robot_sound = robot_sound
+        self.pickup_controller = pickup_controller
+        self.dropoff_rotate_degrees = dropoff_rotate_degrees
+        self.dropoff_return_ratio = dropoff_return_ratio
+        self.dropoff_approach_degrees = dropoff_approach_degrees
+        self.dropoff_pause_s = dropoff_pause_s
 
     def scan_room(self, max_room_entry_degrees: float):
         print(
@@ -80,15 +91,15 @@ class RoomScanner:
         forward_progress = 0.0
 
         while forward_progress < self.room_scan_max_degrees:
-            detected_color = self._scan_arc("left")
+            detected_color, travelled = self._scan_arc("left")
             if detected_color is not None:
-                self._play_detected_color_sound(detected_color)
+                self._handle_arc_detection("left", detected_color, travelled)
                 self._back_to_yellow(forward_progress)
                 return detected_color
 
-            detected_color = self._scan_arc("right")
+            detected_color, travelled = self._scan_arc("right")
             if detected_color is not None:
-                self._play_detected_color_sound(detected_color)
+                self._handle_arc_detection("right", detected_color, travelled)
                 self._back_to_yellow(forward_progress)
                 return detected_color
 
@@ -109,7 +120,7 @@ class RoomScanner:
             self._back_to_yellow(forward_progress)
         return None
 
-    def _scan_arc(self, side: str) -> Optional[str]:
+    def _scan_arc(self, side: str) -> Tuple[Optional[str], float]:
         label = "Room scan: curved %s" % side
         if side == "left":
             left_power = self.sweep_inner_power
@@ -120,20 +131,12 @@ class RoomScanner:
             right_power = self.sweep_inner_power
             target_degrees = self.sweep_right_arc_degrees
 
-        detected_color, travelled = self._run_segment_with_detection(
+        return self._run_segment_with_detection(
             left_power,
             right_power,
             target_degrees,
             label,
         )
-
-        self._run_segment_without_detection(
-            -left_power,
-            -right_power,
-            travelled,
-            "Room scan: backing out of curved %s sweep" % side,
-        )
-        return detected_color
 
     def _scan_straight_step(self, motor_degrees: float) -> Tuple[Optional[str], float]:
         print("Room scan: advancing forward %.0f motor degrees" % motor_degrees)
@@ -246,6 +249,72 @@ class RoomScanner:
             self.room_approach_power,
         )
 
+    def _handle_arc_detection(
+        self,
+        side: str,
+        detected_color: str,
+        travelled: float,
+    ):
+        if side == "left":
+            return_left_power = -self.sweep_inner_power
+            return_right_power = -self.sweep_outer_power
+        else:
+            return_left_power = -self.sweep_outer_power
+            return_right_power = -self.sweep_inner_power
+
+        if detected_color == "GREEN":
+            dropoff_degrees = travelled * self.dropoff_return_ratio
+            remaining_degrees = max(0.0, travelled - dropoff_degrees)
+            print(
+                "Room scan: %s sweep GREEN detected, returning %.0f degrees to dropoff point"
+                % (side, dropoff_degrees)
+            )
+            self._run_segment_without_detection(
+                return_left_power,
+                return_right_power,
+                dropoff_degrees,
+                "Room scan: returning from curved %s sweep" % side,
+            )
+            print(
+                "Room scan: dropoff during %s sweep"
+                % side
+            )
+            if self.dropoff_approach_degrees > 0:
+                print(
+                    "Room scan: nudging forward %.0f motor degrees for dropoff"
+                    % self.dropoff_approach_degrees
+                )
+                self.robot_movement.drive_motor_degrees(
+                    self.dropoff_approach_degrees,
+                    self.room_scan_power,
+                )
+            self._run_dropoff(side)
+            if self.dropoff_approach_degrees > 0:
+                print(
+                    "Room scan: backing up %.0f motor degrees after dropoff"
+                    % self.dropoff_approach_degrees
+                )
+                self.robot_movement.drive_motor_degrees(
+                    -self.dropoff_approach_degrees,
+                    self.room_scan_power,
+                )
+            self._play_detected_color_sound(detected_color)
+            sleep(self.dropoff_pause_s)
+            self._run_segment_without_detection(
+                return_left_power,
+                return_right_power,
+                remaining_degrees,
+                "Room scan: returning rest of curved %s sweep" % side,
+            )
+            return
+
+        self._run_segment_without_detection(
+            return_left_power,
+            return_right_power,
+            travelled,
+            "Room scan: backing out of curved %s sweep" % side,
+        )
+
     def _wait_for_color(
         self,
         target_colors: Tuple[str, ...],
@@ -278,6 +347,19 @@ class RoomScanner:
             return
         print("Room scan: GREEN detected, playing beep")
         self.robot_sound.play_green_detected()
+
+    def _run_dropoff(self, side: str):
+        if self.pickup_controller is None:
+            return
+
+        print(
+            "Room scan: releasing %s cube with %.0f motor degrees"
+            % (side, abs(self.dropoff_rotate_degrees))
+        )
+        if side == "left":
+            self.pickup_controller.rotate_left_relative(self.dropoff_rotate_degrees)
+            return
+        self.pickup_controller.rotate_right_relative(self.dropoff_rotate_degrees)
 
     def _get_sweep_trimmed_powers(
         self,
