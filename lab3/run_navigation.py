@@ -70,6 +70,9 @@ ROOM_DROPOFF_ROTATE_DEGREES = -180
 ROOM_DROPOFF_APPROACH_DEGREES = 45
 ROOM_DROPOFF_RETURN_RATIO = 0.33
 ROOM_DROPOFF_PAUSE_S = 0.4
+EXTRA_ROOM_LINK_MULTIPLIER = 360.0 / DEGREE_UNIT
+FINAL_RETURN_FORWARD_MULTIPLIER = 1.3
+FINAL_RETURN_MAIN_MULTIPLIER = 2.0 + EXTRA_ROOM_LINK_MULTIPLIER
 
 # "drive" uses DEGREE_UNIT * value.
 # Positive = forward, negative = backward.
@@ -86,10 +89,14 @@ MISSION_STEPS: List[Tuple[str, float]] = [
     ("drive", 0.9),
     ("turn", 1),
     ("room", 1),
-    ("turn", 1),
-    ("drive", 2),
     ("turn", -1),
-    ("drive", 1.3),
+    ("drive", EXTRA_ROOM_LINK_MULTIPLIER),
+    ("turn", 1),
+    ("room", 1),
+    ("turn", 1),
+    ("drive", FINAL_RETURN_MAIN_MULTIPLIER),
+    ("turn", -1),
+    ("drive", FINAL_RETURN_FORWARD_MULTIPLIER),
 ]
 
 
