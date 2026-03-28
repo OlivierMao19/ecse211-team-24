@@ -24,12 +24,16 @@ class RoomScanner:
         sweep_inner_power: float,
         sweep_left_trim: float = 0.0,
         sweep_right_trim: float = 0.0,
+        step_pause_s: float = 0.0,
         robot_sound: Optional[RobotSound] = None,
         pickup_controller: Optional[PickupController] = None,
         dropoff_left_rotate_degrees: float = -180.0,
         dropoff_right_rotate_degrees: float = 180.0,
-        dropoff_return_ratio: float = 0.33,
-        dropoff_approach_degrees: float = 45.0,
+        dropoff_detect_pause_s: float = 0.8,
+        dropoff_approach_degrees: float = 180.0,
+        dropoff_shift_degrees: float = 180.0,
+        dropoff_shift_outer_power: float = 24.0,
+        dropoff_shift_inner_power: float = 12.0,
         dropoff_pause_s: float = 0.4,
     ):
         self.robot_movement = robot_movement
@@ -46,13 +50,18 @@ class RoomScanner:
         self.sweep_inner_power = sweep_inner_power
         self.sweep_left_trim = sweep_left_trim
         self.sweep_right_trim = sweep_right_trim
+        self.step_pause_s = step_pause_s
         self.robot_sound = robot_sound
         self.pickup_controller = pickup_controller
         self.dropoff_left_rotate_degrees = dropoff_left_rotate_degrees
         self.dropoff_right_rotate_degrees = dropoff_right_rotate_degrees
-        self.dropoff_return_ratio = dropoff_return_ratio
+        self.dropoff_detect_pause_s = dropoff_detect_pause_s
         self.dropoff_approach_degrees = dropoff_approach_degrees
+        self.dropoff_shift_degrees = dropoff_shift_degrees
+        self.dropoff_shift_outer_power = dropoff_shift_outer_power
+        self.dropoff_shift_inner_power = dropoff_shift_inner_power
         self.dropoff_pause_s = dropoff_pause_s
+        self.completed_dropoffs = 0
 
     def scan_room(self, max_room_entry_degrees: float):
         print(
@@ -99,6 +108,7 @@ class RoomScanner:
                 self._back_to_yellow(forward_progress)
                 return detected_color
             self._return_from_arc("left", travelled)
+            self._pause_between_steps()
 
             detected_color, travelled = self._scan_arc("right")
             if detected_color is not None:
@@ -106,6 +116,7 @@ class RoomScanner:
                 self._back_to_yellow(forward_progress)
                 return detected_color
             self._return_from_arc("right", travelled)
+            self._pause_between_steps()
 
             remaining_progress = self.room_scan_max_degrees - forward_progress
             step_degrees = min(self.sweep_step_degrees, remaining_progress)
@@ -115,6 +126,7 @@ class RoomScanner:
                 self._play_detected_color_sound(detected_color)
                 self._back_to_yellow(forward_progress)
                 return detected_color
+            self._pause_between_steps()
 
         print(
             "Room scan: no GREEN or RED found within %.0f motor degrees"
@@ -259,57 +271,12 @@ class RoomScanner:
         detected_color: str,
         travelled: float,
     ):
-        return_left_power, return_right_power = self._get_return_powers(side)
-
         if detected_color == "GREEN":
-            dropoff_degrees = travelled * self.dropoff_return_ratio
-            remaining_degrees = max(0.0, travelled - dropoff_degrees)
-            print(
-                "Room scan: %s sweep GREEN detected, returning %.0f degrees to dropoff point"
-                % (side, dropoff_degrees)
-            )
-            self._run_segment_without_detection(
-                return_left_power,
-                return_right_power,
-                dropoff_degrees,
-                "Room scan: returning from curved %s sweep" % side,
-            )
-            print(
-                "Room scan: dropoff during %s sweep"
-                % side
-            )
-            if self.dropoff_approach_degrees > 0:
-                print(
-                    "Room scan: nudging forward %.0f motor degrees for dropoff"
-                    % self.dropoff_approach_degrees
-                )
-                self.robot_movement.drive_motor_degrees(
-                    self.dropoff_approach_degrees,
-                    self.room_scan_power,
-                )
-            self._run_dropoff(side)
-            if self.dropoff_approach_degrees > 0:
-                print(
-                    "Room scan: backing up %.0f motor degrees after dropoff"
-                    % self.dropoff_approach_degrees
-                )
-                self.robot_movement.drive_motor_degrees(
-                    -self.dropoff_approach_degrees,
-                    self.room_scan_power,
-                )
-            self._play_detected_color_sound(detected_color)
-            sleep(self.dropoff_pause_s)
-            self._run_segment_without_detection(
-                return_left_power,
-                return_right_power,
-                remaining_degrees,
-                "Room scan: returning rest of curved %s sweep" % side,
-            )
+            self._handle_green_detection(side, travelled)
             return
 
         self._run_segment_without_detection(
-            return_left_power,
-            return_right_power,
+            *self._get_return_powers(side),
             travelled,
             "Room scan: backing out of curved %s sweep" % side,
         )
@@ -375,6 +342,86 @@ class RoomScanner:
             self.pickup_controller.rotate_left_relative(rotate_degrees)
             return
         self.pickup_controller.rotate_right_relative(rotate_degrees)
+
+    def _handle_green_detection(self, sweep_side: str, travelled: float):
+        if self.completed_dropoffs == 0:
+            self._perform_left_dropoff()
+            self.completed_dropoffs += 1
+        elif self.completed_dropoffs == 1:
+            self._perform_right_dropoff()
+            self.completed_dropoffs += 1
+        else:
+            print("Room scan: GREEN detected but no cubes remain for dropoff")
+            self._play_detected_color_sound("GREEN")
+            sleep(self.dropoff_pause_s)
+
+        self._return_from_arc(sweep_side, travelled)
+
+    def _perform_left_dropoff(self):
+        print("Room scan: first GREEN detected, using left dropoff")
+        sleep(self.dropoff_detect_pause_s)
+        self._run_dropoff_maneuver("right", "left")
+
+    def _perform_right_dropoff(self):
+        print("Room scan: second GREEN detected, using right dropoff")
+        sleep(self.dropoff_detect_pause_s)
+        self._run_dropoff_maneuver("left", "right")
+
+    def _run_dropoff_maneuver(self, shift_direction: str, release_side: str):
+        if self.dropoff_approach_degrees > 0:
+            print(
+                "Room scan: moving forward %.0f motor degrees for dropoff"
+                % self.dropoff_approach_degrees
+            )
+            self.robot_movement.drive_motor_degrees(
+                self.dropoff_approach_degrees,
+                self.room_scan_power,
+            )
+
+        self._run_shift_turn(shift_direction, self.dropoff_shift_degrees)
+        self._run_dropoff(release_side)
+        self._run_shift_turn(self._mirror_direction(shift_direction), self.dropoff_shift_degrees)
+
+        if self.dropoff_approach_degrees > 0:
+            print(
+                "Room scan: backing up %.0f motor degrees after dropoff"
+                % self.dropoff_approach_degrees
+            )
+            self.robot_movement.drive_motor_degrees(
+                -self.dropoff_approach_degrees,
+                self.room_scan_power,
+            )
+
+        self._play_detected_color_sound("GREEN")
+        sleep(self.dropoff_pause_s)
+
+    def _run_shift_turn(self, direction: str, motor_degrees: float):
+        if motor_degrees <= 0:
+            return
+
+        if direction == "right":
+            left_power = self.dropoff_shift_outer_power
+            right_power = self.dropoff_shift_inner_power
+        else:
+            left_power = self.dropoff_shift_inner_power
+            right_power = self.dropoff_shift_outer_power
+
+        self._run_segment_without_detection(
+            left_power,
+            right_power,
+            motor_degrees,
+            "Room scan: shifting %s for dropoff" % direction,
+        )
+
+    def _mirror_direction(self, direction: str) -> str:
+        if direction == "right":
+            return "left"
+        return "right"
+
+    def _pause_between_steps(self):
+        if self.step_pause_s <= 0:
+            return
+        sleep(self.step_pause_s)
 
     def _get_sweep_trimmed_powers(
         self,
