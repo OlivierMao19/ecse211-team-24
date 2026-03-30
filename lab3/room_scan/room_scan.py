@@ -24,7 +24,13 @@ class RoomScanner:
         sweep_inner_power: float,
         sweep_left_trim: float = 0.0,
         sweep_right_trim: float = 0.0,
+        sweep_left_return_scale: float = 1.0,
+        sweep_right_return_scale: float = 1.0,
         step_pause_s: float = 0.0,
+        realign_to_room_heading: bool = True,
+        room_heading_extra_correction_deg: float = 0.0,
+        room_heading_tolerance_deg: float = 2.0,
+        room_heading_turn_power: float = 8.0,
         robot_sound: Optional[RobotSound] = None,
         pickup_controller: Optional[PickupController] = None,
         dropoff_left_rotate_degrees: float = -180.0,
@@ -50,7 +56,13 @@ class RoomScanner:
         self.sweep_inner_power = sweep_inner_power
         self.sweep_left_trim = sweep_left_trim
         self.sweep_right_trim = sweep_right_trim
+        self.sweep_left_return_scale = sweep_left_return_scale
+        self.sweep_right_return_scale = sweep_right_return_scale
         self.step_pause_s = step_pause_s
+        self.realign_to_room_heading = realign_to_room_heading
+        self.room_heading_extra_correction_deg = room_heading_extra_correction_deg
+        self.room_heading_tolerance_deg = room_heading_tolerance_deg
+        self.room_heading_turn_power = room_heading_turn_power
         self.robot_sound = robot_sound
         self.pickup_controller = pickup_controller
         self.dropoff_left_rotate_degrees = dropoff_left_rotate_degrees
@@ -62,6 +74,7 @@ class RoomScanner:
         self.dropoff_shift_inner_power = dropoff_shift_inner_power
         self.dropoff_pause_s = dropoff_pause_s
         self.completed_dropoffs = 0
+        self.room_heading_reference = None
 
     def scan_room(self, max_room_entry_degrees: float):
         print(
@@ -90,6 +103,7 @@ class RoomScanner:
                     % yellow_position
                 )
                 self.robot_movement.stop_move()
+                self._mark_room_heading()
                 return self._sweep_for_bed()
 
             sleep(0.01)
@@ -105,6 +119,7 @@ class RoomScanner:
             detected_color, travelled = self._scan_arc("left")
             if detected_color is not None:
                 self._handle_arc_detection("left", detected_color, travelled)
+                self._pause_between_steps()
                 self._back_to_yellow(forward_progress)
                 return detected_color
             self._return_from_arc("left", travelled)
@@ -113,6 +128,7 @@ class RoomScanner:
             detected_color, travelled = self._scan_arc("right")
             if detected_color is not None:
                 self._handle_arc_detection("right", detected_color, travelled)
+                self._pause_between_steps()
                 self._back_to_yellow(forward_progress)
                 return detected_color
             self._return_from_arc("right", travelled)
@@ -204,6 +220,7 @@ class RoomScanner:
         self.robot_movement.reset_drive_reference()
         streak_color = None
         streak_count = 0
+        detected_color = None
 
         while abs(self.robot_movement.get_average_encoder()) < target_degrees:
             trimmed_left, trimmed_right = self._get_sweep_trimmed_powers(
@@ -218,18 +235,17 @@ class RoomScanner:
                 streak_color,
                 streak_count,
             )
-            if found_bed_color:
-                self.robot_movement.stop_move()
+            if found_bed_color and detected_color is None:
+                detected_color = streak_color
                 print(
-                    "%s detected %s after %.0f motor degrees"
+                    "%s detected %s after %.0f motor degrees, finishing sweep"
                     % (label, streak_color, travelled)
                 )
-                return streak_color, travelled
 
             sleep(0.01)
 
         self.robot_movement.stop_move()
-        return None, abs(self.robot_movement.get_average_encoder())
+        return detected_color, abs(self.robot_movement.get_average_encoder())
 
     def _run_segment_without_detection(
         self,
@@ -256,6 +272,7 @@ class RoomScanner:
         if travelled_since_yellow <= 0:
             return
 
+        self._realign_to_room_heading()
         print(
             "Room scan: backing up %.0f motor degrees to return from yellow scan"
             % travelled_since_yellow
@@ -271,15 +288,13 @@ class RoomScanner:
         detected_color: str,
         travelled: float,
     ):
-        if detected_color == "GREEN":
-            self._handle_green_detection(side, travelled)
-            return
-
         self._run_segment_without_detection(
             *self._get_return_powers(side),
-            travelled,
+            self._get_return_degrees(side, travelled),
             "Room scan: backing out of curved %s sweep" % side,
         )
+        if detected_color == "GREEN":
+            self._handle_green_detection()
 
     def _return_from_arc(self, side: str, travelled: float):
         if travelled <= 0:
@@ -289,7 +304,7 @@ class RoomScanner:
         self._run_segment_without_detection(
             return_left_power,
             return_right_power,
-            travelled,
+            self._get_return_degrees(side, travelled),
             "Room scan: backing out of curved %s sweep" % side,
         )
 
@@ -343,80 +358,21 @@ class RoomScanner:
             return
         self.pickup_controller.rotate_right_relative(rotate_degrees)
 
-    def _handle_green_detection(self, sweep_side: str, travelled: float):
+    def _handle_green_detection(self):
         if self.completed_dropoffs == 0:
-            self._perform_left_dropoff()
+            print("Room scan: first GREEN detected, opening left pickup motor")
+            sleep(self.dropoff_detect_pause_s)
+            self._run_dropoff("left")
             self.completed_dropoffs += 1
         elif self.completed_dropoffs == 1:
-            self._perform_right_dropoff()
+            print("Room scan: second GREEN detected, opening right pickup motor")
+            sleep(self.dropoff_detect_pause_s)
+            self._run_dropoff("right")
             self.completed_dropoffs += 1
         else:
             print("Room scan: GREEN detected but no cubes remain for dropoff")
-            self._play_detected_color_sound("GREEN")
-            sleep(self.dropoff_pause_s)
-
-        self._return_from_arc(sweep_side, travelled)
-
-    def _perform_left_dropoff(self):
-        print("Room scan: first GREEN detected, using left dropoff")
-        sleep(self.dropoff_detect_pause_s)
-        self._run_dropoff_maneuver("right", "left")
-
-    def _perform_right_dropoff(self):
-        print("Room scan: second GREEN detected, using right dropoff")
-        sleep(self.dropoff_detect_pause_s)
-        self._run_dropoff_maneuver("left", "right")
-
-    def _run_dropoff_maneuver(self, shift_direction: str, release_side: str):
-        if self.dropoff_approach_degrees > 0:
-            print(
-                "Room scan: moving forward %.0f motor degrees for dropoff"
-                % self.dropoff_approach_degrees
-            )
-            self.robot_movement.drive_motor_degrees(
-                self.dropoff_approach_degrees,
-                self.room_scan_power,
-            )
-
-        self._run_shift_turn(shift_direction, self.dropoff_shift_degrees)
-        self._run_dropoff(release_side)
-        self._run_shift_turn(self._mirror_direction(shift_direction), self.dropoff_shift_degrees)
-
-        if self.dropoff_approach_degrees > 0:
-            print(
-                "Room scan: backing up %.0f motor degrees after dropoff"
-                % self.dropoff_approach_degrees
-            )
-            self.robot_movement.drive_motor_degrees(
-                -self.dropoff_approach_degrees,
-                self.room_scan_power,
-            )
-
         self._play_detected_color_sound("GREEN")
         sleep(self.dropoff_pause_s)
-
-    def _run_shift_turn(self, direction: str, motor_degrees: float):
-        if motor_degrees <= 0:
-            return
-
-        if direction == "right":
-            left_power = self.dropoff_shift_outer_power
-            right_power = self.dropoff_shift_inner_power
-        else:
-            left_power = self.dropoff_shift_inner_power
-            right_power = self.dropoff_shift_outer_power
-
-        self._run_segment_without_detection(
-            left_power,
-            right_power,
-            motor_degrees,
-            "Room scan: shifting %s for dropoff" % direction,
-        )
-
-    def _mirror_direction(self, direction: str) -> str:
-        if direction == "right":
-            return "left"
-        return "right"
 
     def _pause_between_steps(self):
         if self.step_pause_s <= 0:
@@ -444,3 +400,68 @@ class RoomScanner:
         if side == "left":
             return -self.sweep_inner_power, -self.sweep_outer_power
         return -self.sweep_outer_power, -self.sweep_inner_power
+
+    def _get_return_degrees(self, side: str, travelled: float) -> float:
+        if side == "left":
+            return travelled * self.sweep_left_return_scale
+        return travelled * self.sweep_right_return_scale
+
+    def _mark_room_heading(self):
+        if self.robot_movement.gyro_sensor is None:
+            return
+        self.robot_movement.gyro_sensor.set_reference()
+        self.room_heading_reference = self.robot_movement.gyro_sensor.get_reference()
+        print("Room scan: stored room heading reference")
+
+    def _realign_to_room_heading(self):
+        if not self.realign_to_room_heading or self.robot_movement.gyro_sensor is None:
+            return
+        if self.room_heading_reference is None:
+            return
+
+        self.robot_movement.gyro_sensor.set_reference(self.room_heading_reference)
+        current_angle = self.robot_movement.gyro_sensor.get_angle()
+        target_angle = 0.0
+        if current_angle > 0:
+            target_angle = -self.room_heading_extra_correction_deg
+        elif current_angle < 0:
+            target_angle = self.room_heading_extra_correction_deg
+
+        heading_error = current_angle - target_angle
+        if abs(heading_error) <= self.room_heading_tolerance_deg:
+            return
+
+        print(
+            "Room scan: realigning from %.1f deg toward %.1f deg"
+            % (current_angle, target_angle)
+        )
+        slow_turn_power = min(
+            self.room_heading_turn_power,
+            self.robot_movement.MIN_TURN_POWER,
+        )
+        settle_deadline = 120
+
+        while settle_deadline > 0:
+            current_angle = self.robot_movement.gyro_sensor.get_angle()
+            heading_error = current_angle - target_angle
+            if abs(heading_error) <= self.room_heading_tolerance_deg:
+                break
+
+            direction = -1 if heading_error > 0 else 1
+            turn_power = self.room_heading_turn_power
+            if abs(heading_error) <= 8.0:
+                turn_power = slow_turn_power
+            self.robot_movement.adjust_speed(
+                direction * turn_power,
+                -direction * turn_power,
+            )
+            sleep(0.01)
+            settle_deadline -= 1
+
+        self.robot_movement.stop_move()
+        sleep(0.05)
+        self.robot_movement.gyro_sensor.set_reference(self.room_heading_reference)
+        final_error = (
+            self.robot_movement.gyro_sensor.get_angle() - target_angle
+        )
+        print("Room scan: room heading error after realign %.1f deg" % final_error)
