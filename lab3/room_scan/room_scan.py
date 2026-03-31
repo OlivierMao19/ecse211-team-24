@@ -26,11 +26,13 @@ class RoomScanner:
         sweep_right_trim: float = 0.0,
         sweep_left_return_scale: float = 1.0,
         sweep_right_return_scale: float = 1.0,
+        room_entry_pause_s: float = 0.0,
         step_pause_s: float = 0.0,
         realign_to_room_heading: bool = True,
         room_heading_extra_correction_deg: float = 0.0,
         room_heading_tolerance_deg: float = 2.0,
         room_heading_turn_power: float = 8.0,
+        room_exit_extra_degrees: float = 0.0,
         robot_sound: Optional[RobotSound] = None,
         pickup_controller: Optional[PickupController] = None,
         dropoff_left_rotate_degrees: float = -180.0,
@@ -58,11 +60,13 @@ class RoomScanner:
         self.sweep_right_trim = sweep_right_trim
         self.sweep_left_return_scale = sweep_left_return_scale
         self.sweep_right_return_scale = sweep_right_return_scale
+        self.room_entry_pause_s = room_entry_pause_s
         self.step_pause_s = step_pause_s
         self.realign_to_room_heading = realign_to_room_heading
         self.room_heading_extra_correction_deg = room_heading_extra_correction_deg
         self.room_heading_tolerance_deg = room_heading_tolerance_deg
         self.room_heading_turn_power = room_heading_turn_power
+        self.room_exit_extra_degrees = room_exit_extra_degrees
         self.robot_sound = robot_sound
         self.pickup_controller = pickup_controller
         self.dropoff_left_rotate_degrees = dropoff_left_rotate_degrees
@@ -104,6 +108,8 @@ class RoomScanner:
                 )
                 self.robot_movement.stop_move()
                 self._mark_room_heading()
+                if self.room_entry_pause_s > 0:
+                    sleep(self.room_entry_pause_s)
                 return self._sweep_for_bed()
 
             sleep(0.01)
@@ -153,14 +159,14 @@ class RoomScanner:
         return None
 
     def _scan_arc(self, side: str) -> Tuple[Optional[str], float]:
-        label = "Room scan: curved %s" % side
+        label = "Room scan: pivot %s" % side
         if side == "left":
-            left_power = self.sweep_inner_power
+            left_power = -self.sweep_inner_power
             right_power = self.sweep_outer_power
             target_degrees = self.sweep_left_arc_degrees
         else:
             left_power = self.sweep_outer_power
-            right_power = self.sweep_inner_power
+            right_power = -self.sweep_inner_power
             target_degrees = self.sweep_right_arc_degrees
 
         return self._run_segment_with_detection(
@@ -168,6 +174,7 @@ class RoomScanner:
             right_power,
             target_degrees,
             label,
+            use_turn_progress=True,
         )
 
     def _scan_straight_step(self, motor_degrees: float) -> Tuple[Optional[str], float]:
@@ -216,36 +223,38 @@ class RoomScanner:
         right_power: float,
         target_degrees: float,
         label: str,
+        use_turn_progress: bool = False,
     ) -> Tuple[Optional[str], float]:
         self.robot_movement.reset_drive_reference()
         streak_color = None
         streak_count = 0
         detected_color = None
 
-        while abs(self.robot_movement.get_average_encoder()) < target_degrees:
+        while self._get_segment_progress(use_turn_progress) < target_degrees:
             trimmed_left, trimmed_right = self._get_sweep_trimmed_powers(
                 left_power,
                 right_power,
             )
             self.robot_movement.adjust_speed(trimmed_left, trimmed_right)
-            travelled = abs(self.robot_movement.get_average_encoder())
+            travelled = self._get_segment_progress(use_turn_progress)
             self._print_color_measurement(label)
             found_bed_color, streak_color, streak_count = self._wait_for_color(
                 ("GREEN", "RED"),
                 streak_color,
                 streak_count,
             )
-            if found_bed_color and detected_color is None:
-                detected_color = streak_color
+            if found_bed_color:
+                self.robot_movement.stop_move()
                 print(
-                    "%s detected %s after %.0f motor degrees, finishing sweep"
+                    "%s detected %s after %.0f motor degrees"
                     % (label, streak_color, travelled)
                 )
+                return streak_color, travelled
 
             sleep(0.01)
 
         self.robot_movement.stop_move()
-        return detected_color, abs(self.robot_movement.get_average_encoder())
+        return detected_color, self._get_segment_progress(use_turn_progress)
 
     def _run_segment_without_detection(
         self,
@@ -253,13 +262,14 @@ class RoomScanner:
         right_power: float,
         target_degrees: float,
         label: str,
+        use_turn_progress: bool = False,
     ):
         if target_degrees <= 0:
             return
 
         print("%s for %.0f motor degrees" % (label, target_degrees))
         self.robot_movement.reset_drive_reference()
-        while abs(self.robot_movement.get_average_encoder()) < target_degrees:
+        while self._get_segment_progress(use_turn_progress) < target_degrees:
             trimmed_left, trimmed_right = self._get_sweep_trimmed_powers(
                 left_power,
                 right_power,
@@ -269,16 +279,17 @@ class RoomScanner:
         self.robot_movement.stop_move()
 
     def _back_to_yellow(self, travelled_since_yellow: float):
-        if travelled_since_yellow <= 0:
+        total_backout = travelled_since_yellow + self.room_exit_extra_degrees
+        if total_backout <= 0:
             return
 
         self._realign_to_room_heading()
         print(
             "Room scan: backing up %.0f motor degrees to return from yellow scan"
-            % travelled_since_yellow
+            % total_backout
         )
         self.robot_movement.drive_motor_degrees_heading(
-            -travelled_since_yellow,
+            -total_backout,
             self.room_approach_power,
         )
 
@@ -288,10 +299,13 @@ class RoomScanner:
         detected_color: str,
         travelled: float,
     ):
+        if self.dropoff_detect_pause_s > 0:
+            sleep(self.dropoff_detect_pause_s)
         self._run_segment_without_detection(
             *self._get_return_powers(side),
             self._get_return_degrees(side, travelled),
             "Room scan: backing out of curved %s sweep" % side,
+            use_turn_progress=True,
         )
         if detected_color == "GREEN":
             self._handle_green_detection()
@@ -306,6 +320,7 @@ class RoomScanner:
             return_right_power,
             self._get_return_degrees(side, travelled),
             "Room scan: backing out of curved %s sweep" % side,
+            use_turn_progress=True,
         )
 
     def _wait_for_color(
@@ -398,13 +413,18 @@ class RoomScanner:
 
     def _get_return_powers(self, side: str) -> Tuple[float, float]:
         if side == "left":
-            return -self.sweep_inner_power, -self.sweep_outer_power
-        return -self.sweep_outer_power, -self.sweep_inner_power
+            return self.sweep_inner_power, -self.sweep_outer_power
+        return -self.sweep_outer_power, self.sweep_inner_power
 
     def _get_return_degrees(self, side: str, travelled: float) -> float:
         if side == "left":
             return travelled * self.sweep_left_return_scale
         return travelled * self.sweep_right_return_scale
+
+    def _get_segment_progress(self, use_turn_progress: bool) -> float:
+        if use_turn_progress:
+            return self.robot_movement.get_turn_encoder_progress()
+        return abs(self.robot_movement.get_average_encoder())
 
     def _mark_room_heading(self):
         if self.robot_movement.gyro_sensor is None:
