@@ -472,7 +472,7 @@ class RoomScanner:
 
     def _get_return_degrees(self, side: str, travelled: float) -> float:
         if side == "left":
-            return travelled * self.sweep_left_return_scale
+            return max(0.0, travelled * self.sweep_left_return_scale - 2.0)
         return travelled * self.sweep_right_return_scale
 
     def _get_segment_progress(self, use_turn_progress: bool) -> float:
