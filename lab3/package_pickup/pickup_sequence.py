@@ -54,8 +54,8 @@ TURN_SLOWDOWN_DEG = 16.0
 GYRO_SETTLE_SECONDS = 2.0
 GYRO_SETTLE_TOLERANCE_DEG = 2.0
 
-FORWARD_DEGREES = 630
-BACKWARD_DEGREES = -450
+FORWARD_DEGREES = 0
+BACKWARD_DEGREES = -400
 PICKUP_ROTATE_DEGREES = 135 #Change this if we want the cube to be stuck more
 PICKUP_SETTLE_SECONDS = 0.6
 EXIT_TURN_DEG = -89
@@ -107,8 +107,9 @@ def run_pickup_sequence(
     robot_movement: RobotMovement,
     pickup_controller: PickupController,
 ):
-    print("Pickup step 1: drive forward to cubes")
-    robot_movement.drive_motor_degrees_heading(FORWARD_DEGREES, DRIVE_POWER)
+    if FORWARD_DEGREES != 0:
+        print("Pickup step 1: drive forward to cubes")
+        robot_movement.drive_motor_degrees_heading(FORWARD_DEGREES, DRIVE_POWER)
 
     print("Pickup step 2: close scoops")
     pickup_controller.rotate_relative(PICKUP_ROTATE_DEGREES)

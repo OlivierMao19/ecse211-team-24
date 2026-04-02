@@ -80,6 +80,9 @@ class RoomScanner:
         self.completed_dropoffs = 0
         self.room_heading_reference = None
 
+    def has_completed_all_dropoffs(self) -> bool:
+        return self.completed_dropoffs >= 2
+
     def scan_room(self, max_room_entry_degrees: float):
         print(
             "Room approach: driving until yellow for up to %.0f motor degrees"
@@ -121,6 +124,16 @@ class RoomScanner:
     def _sweep_for_bed(self):
         forward_progress = 0.0
 
+        initial_step_degrees = min(self.sweep_step_degrees, self.room_scan_max_degrees)
+        if initial_step_degrees > 0:
+            detected_color, travelled = self._scan_straight_step(initial_step_degrees)
+            forward_progress += travelled
+            if detected_color is not None:
+                self._play_detected_color_sound(detected_color)
+                self._back_to_yellow(forward_progress)
+                return detected_color
+            self._pause_between_steps()
+
         while forward_progress < self.room_scan_max_degrees:
             detected_color, travelled = self._scan_arc("left")
             if detected_color is not None:
@@ -160,13 +173,10 @@ class RoomScanner:
 
     def _scan_arc(self, side: str) -> Tuple[Optional[str], float]:
         label = "Room scan: pivot %s" % side
+        left_power, right_power = self._get_arc_powers(side)
         if side == "left":
-            left_power = -self.sweep_inner_power
-            right_power = self.sweep_outer_power
             target_degrees = self.sweep_left_arc_degrees
         else:
-            left_power = self.sweep_outer_power
-            right_power = -self.sweep_inner_power
             target_degrees = self.sweep_right_arc_degrees
 
         return self._run_segment_with_detection(
@@ -299,16 +309,13 @@ class RoomScanner:
         detected_color: str,
         travelled: float,
     ):
+        if detected_color == "GREEN":
+            self._handle_green_detection(side, travelled)
+            return
+
         if self.dropoff_detect_pause_s > 0:
             sleep(self.dropoff_detect_pause_s)
-        self._run_segment_without_detection(
-            *self._get_return_powers(side),
-            self._get_return_degrees(side, travelled),
-            "Room scan: backing out of curved %s sweep" % side,
-            use_turn_progress=True,
-        )
-        if detected_color == "GREEN":
-            self._handle_green_detection()
+        self._return_from_arc(side, travelled)
 
     def _return_from_arc(self, side: str, travelled: float):
         if travelled <= 0:
@@ -373,21 +380,50 @@ class RoomScanner:
             return
         self.pickup_controller.rotate_right_relative(rotate_degrees)
 
-    def _handle_green_detection(self):
-        if self.completed_dropoffs == 0:
-            print("Room scan: first GREEN detected, opening left pickup motor")
-            sleep(self.dropoff_detect_pause_s)
-            self._run_dropoff("left")
-            self.completed_dropoffs += 1
-        elif self.completed_dropoffs == 1:
-            print("Room scan: second GREEN detected, opening right pickup motor")
-            sleep(self.dropoff_detect_pause_s)
-            self._run_dropoff("right")
-            self.completed_dropoffs += 1
-        else:
+    def _handle_green_detection(self, side: str, travelled: float):
+        dropoff_side = self._get_next_dropoff_side()
+        if dropoff_side is None:
             print("Room scan: GREEN detected but no cubes remain for dropoff")
+            self._return_from_arc(side, travelled)
+            self._play_detected_color_sound("GREEN")
+            sleep(self.dropoff_pause_s)
+            return
+
+        if self.dropoff_detect_pause_s > 0:
+            sleep(self.dropoff_detect_pause_s)
+
+        offset_degrees = self.dropoff_shift_degrees
+        return_degrees = self._get_return_degrees(side, travelled)
+        if dropoff_side == side:
+            # The matching scoop is closer after a small move toward the middle.
+            offset_left_power, offset_right_power = self._get_return_powers(side)
+            offset_degrees = min(offset_degrees, return_degrees)
+            remaining_return = max(return_degrees - offset_degrees, 0.0)
+            offset_label = "Room scan: offset %s toward middle for dropoff" % side
+        else:
+            # The opposite scoop needs a little more travel in the current sweep direction.
+            offset_left_power, offset_right_power = self._get_arc_powers(side)
+            remaining_return = return_degrees + offset_degrees
+            offset_label = "Room scan: offset %s outward for opposite dropoff" % side
+
+        self._run_segment_without_detection(
+            offset_left_power,
+            offset_right_power,
+            offset_degrees,
+            offset_label,
+            use_turn_progress=True,
+        )
+        print("Room scan: opening %s pickup motor on GREEN" % dropoff_side)
+        self._run_dropoff(dropoff_side)
+        self.completed_dropoffs += 1
         self._play_detected_color_sound("GREEN")
         sleep(self.dropoff_pause_s)
+        self._run_segment_without_detection(
+            *self._get_return_powers(side),
+            remaining_return,
+            "Room scan: backing out of curved %s sweep" % side,
+            use_turn_progress=True,
+        )
 
     def _pause_between_steps(self):
         if self.step_pause_s <= 0:
@@ -416,6 +452,11 @@ class RoomScanner:
             return self.sweep_inner_power, -self.sweep_outer_power
         return -self.sweep_outer_power, self.sweep_inner_power
 
+    def _get_arc_powers(self, side: str) -> Tuple[float, float]:
+        if side == "left":
+            return -self.sweep_inner_power, self.sweep_outer_power
+        return self.sweep_outer_power, -self.sweep_inner_power
+
     def _get_return_degrees(self, side: str, travelled: float) -> float:
         if side == "left":
             return travelled * self.sweep_left_return_scale
@@ -425,6 +466,13 @@ class RoomScanner:
         if use_turn_progress:
             return self.robot_movement.get_turn_encoder_progress()
         return abs(self.robot_movement.get_average_encoder())
+
+    def _get_next_dropoff_side(self) -> Optional[str]:
+        if self.completed_dropoffs == 0:
+            return "left"
+        if self.completed_dropoffs == 1:
+            return "right"
+        return None
 
     def _mark_room_heading(self):
         if self.robot_movement.gyro_sensor is None:

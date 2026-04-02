@@ -78,11 +78,11 @@ ROOM_HEADING_EXTRA_CORRECTION_DEG = 0.0
 ROOM_HEADING_TOLERANCE_DEG = 1.0
 ROOM_HEADING_TURN_POWER = 8.0
 ROOM_EXIT_EXTRA_DEGREES = 100
-ROOM_DROPOFF_LEFT_ROTATE_DEGREES = -180
-ROOM_DROPOFF_RIGHT_ROTATE_DEGREES = -180
+ROOM_DROPOFF_LEFT_ROTATE_DEGREES = -200
+ROOM_DROPOFF_RIGHT_ROTATE_DEGREES = -200
 ROOM_DROPOFF_DETECT_PAUSE_S = 0.8
 ROOM_DROPOFF_APPROACH_DEGREES = 180
-ROOM_DROPOFF_SHIFT_DEGREES = 180
+ROOM_DROPOFF_SHIFT_DEGREES = 40
 ROOM_DROPOFF_SHIFT_OUTER_POWER = 24
 ROOM_DROPOFF_SHIFT_INNER_POWER = 12
 ROOM_DROPOFF_PAUSE_S = 3.0
@@ -176,6 +176,12 @@ def run_mission(robot_movement: RobotMovement, room_scanner: RoomScanner):
             continue
 
         if action == "room":
+            if room_scanner.has_completed_all_dropoffs():
+                print(
+                    "Step %d: skipping room exploration because both cubes were dropped off"
+                    % index
+                )
+                continue
             print("Step %d: enter room and scan for bed color" % index)
             room_scanner.scan_room(DEGREE_UNIT * value)
             continue
