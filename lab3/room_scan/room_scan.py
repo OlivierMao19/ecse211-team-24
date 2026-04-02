@@ -38,8 +38,9 @@ class RoomScanner:
         dropoff_left_rotate_degrees: float = -180.0,
         dropoff_right_rotate_degrees: float = 180.0,
         dropoff_detect_pause_s: float = 0.8,
-        dropoff_approach_degrees: float = 180.0,
         dropoff_shift_degrees: float = 180.0,
+        dropoff_opposite_shift_degrees: Optional[float] = None,
+        dropoff_approach_degrees: float = 180.0,
         dropoff_shift_outer_power: float = 24.0,
         dropoff_shift_inner_power: float = 12.0,
         dropoff_pause_s: float = 0.4,
@@ -72,8 +73,13 @@ class RoomScanner:
         self.dropoff_left_rotate_degrees = dropoff_left_rotate_degrees
         self.dropoff_right_rotate_degrees = dropoff_right_rotate_degrees
         self.dropoff_detect_pause_s = dropoff_detect_pause_s
-        self.dropoff_approach_degrees = dropoff_approach_degrees
         self.dropoff_shift_degrees = dropoff_shift_degrees
+        self.dropoff_opposite_shift_degrees = (
+            dropoff_shift_degrees
+            if dropoff_opposite_shift_degrees is None
+            else dropoff_opposite_shift_degrees
+        )
+        self.dropoff_approach_degrees = dropoff_approach_degrees
         self.dropoff_shift_outer_power = dropoff_shift_outer_power
         self.dropoff_shift_inner_power = dropoff_shift_inner_power
         self.dropoff_pause_s = dropoff_pause_s
@@ -402,6 +408,7 @@ class RoomScanner:
             offset_label = "Room scan: offset %s toward middle for dropoff" % side
         else:
             # The opposite scoop needs a little more travel in the current sweep direction.
+            offset_degrees = self.dropoff_opposite_shift_degrees
             offset_left_power, offset_right_power = self._get_arc_powers(side)
             remaining_return = return_degrees + offset_degrees
             offset_label = "Room scan: offset %s outward for opposite dropoff" % side
