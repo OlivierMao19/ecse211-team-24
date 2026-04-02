@@ -99,7 +99,7 @@ FINAL_RETURN_MAIN_MULTIPLIER = 2.0 + EXTRA_ROOM_LINK_MULTIPLIER
 MISSION_STEPS: List[Tuple[str, float]] = [
     ("room", 3),
     ("turn", 1),
-    ("drive", 1.9),
+    ("drive", 1.8),
     ("turn", -1),
     ("room", 1),
     ("turn", 1),
@@ -191,9 +191,9 @@ def run_mission(robot_movement: RobotMovement, room_scanner: RoomScanner):
             direction = "right" if value > 0 else "left"
             print(
                 "Step %d: turn %s for %.0f degrees"
-                % (index, direction, abs(90 * value))
+                % (index, direction, abs(88 * value))
             )
-            robot_movement.pivot_turn_gyro(85 * value, TURN_POWER)
+            robot_movement.pivot_turn_gyro(88 * value, TURN_POWER)
             continue
 
         raise ValueError("Unsupported action: %s" % action)

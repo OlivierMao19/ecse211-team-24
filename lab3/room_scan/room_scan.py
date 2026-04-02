@@ -164,7 +164,13 @@ class RoomScanner:
             detected_color, travelled = self._scan_straight_step(step_degrees)
             forward_progress += travelled
             if detected_color is not None:
-                self._play_detected_color_sound(detected_color)
+                if detected_color == "GREEN":
+                    next_dropoff_side = self._get_next_dropoff_side()
+                    if next_dropoff_side is not None:
+                        virtual_side = "right" if next_dropoff_side == "left" else "left"
+                        self._handle_green_detection(virtual_side, 0.0)
+                else:
+                    self._play_detected_color_sound(detected_color)
                 self._back_to_yellow(forward_progress)
                 return detected_color
             self._pause_between_steps()
