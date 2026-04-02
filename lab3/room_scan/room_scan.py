@@ -171,6 +171,7 @@ class RoomScanner:
                         self._handle_green_detection(virtual_side, 0.0)
                 else:
                     self._play_detected_color_sound(detected_color)
+                    sleep(self.dropoff_pause_s)
                 self._back_to_yellow(forward_progress)
                 return detected_color
             self._pause_between_steps()
@@ -328,6 +329,7 @@ class RoomScanner:
         if self.dropoff_detect_pause_s > 0:
             sleep(self.dropoff_detect_pause_s)
         self._return_from_arc(side, travelled)
+        sleep(self.dropoff_pause_s)
 
     def _return_from_arc(self, side: str, travelled: float):
         if travelled <= 0:

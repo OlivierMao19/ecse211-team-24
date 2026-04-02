@@ -76,7 +76,7 @@ ROOM_SWEEP_STEP_PAUSE_S = 0.8
 ROOM_REALIGN_TO_HEADING = True
 ROOM_HEADING_EXTRA_CORRECTION_DEG = 0.0
 ROOM_HEADING_TOLERANCE_DEG = 1.0
-ROOM_HEADING_TURN_POWER = 8.0
+ROOM_HEADING_TURN_POWER = 10.0
 ROOM_EXIT_EXTRA_DEGREES = 100
 ROOM_DROPOFF_LEFT_ROTATE_DEGREES = -200
 ROOM_DROPOFF_RIGHT_ROTATE_DEGREES = -200
@@ -87,7 +87,7 @@ ROOM_DROPOFF_APPROACH_DEGREES = 180
 ROOM_DROPOFF_SHIFT_OUTER_POWER = 24
 ROOM_DROPOFF_SHIFT_INNER_POWER = 12
 ROOM_DROPOFF_PAUSE_S = 3.0
-EXTRA_ROOM_LINK_MULTIPLIER = 360.0 / DEGREE_UNIT
+EXTRA_ROOM_LINK_MULTIPLIER = 560.0 / DEGREE_UNIT
 FINAL_RETURN_FORWARD_MULTIPLIER = 1.3
 FINAL_RETURN_MAIN_MULTIPLIER = 2.0 + EXTRA_ROOM_LINK_MULTIPLIER
 
@@ -98,7 +98,7 @@ FINAL_RETURN_MAIN_MULTIPLIER = 2.0 + EXTRA_ROOM_LINK_MULTIPLIER
 # "room" drives in until yellow, scans until green/red, then backs up from yellow.
 MISSION_STEPS: List[Tuple[str, float]] = [
     ("room", 3),
-    ("turn", 1),
+    ("turnFirst", 1),
     ("drive", 1.8),
     ("turn", -1),
     ("room", 1),
@@ -106,9 +106,9 @@ MISSION_STEPS: List[Tuple[str, float]] = [
     ("drive", 0.9),
     ("turn", 1),
     ("room", 1),
-    ("turn", -1),
-    ("drive", EXTRA_ROOM_LINK_MULTIPLIER),
     ("turn", 1),
+    ("drive", -EXTRA_ROOM_LINK_MULTIPLIER),
+    ("turn", -1),
     ("room", 1),
     ("turn", 1),
     ("drive", FINAL_RETURN_MAIN_MULTIPLIER),
@@ -187,13 +187,22 @@ def run_mission(robot_movement: RobotMovement, room_scanner: RoomScanner):
             room_scanner.scan_room(DEGREE_UNIT * value)
             continue
 
+        if action == "turnFirst":
+            direction = "right" if value > 0 else "left"
+            print(
+                "Step %d: turn %s for %.0f degrees"
+                % (index, direction, abs(86.5 * value))
+            )
+            robot_movement.pivot_turn_gyro(86.5 * value, TURN_POWER)
+            continue
+
         if action == "turn":
             direction = "right" if value > 0 else "left"
             print(
                 "Step %d: turn %s for %.0f degrees"
-                % (index, direction, abs(88 * value))
+                % (index, direction, abs(89 * value))
             )
-            robot_movement.pivot_turn_gyro(88 * value, TURN_POWER)
+            robot_movement.pivot_turn_gyro(89 * value, TURN_POWER)
             continue
 
         raise ValueError("Unsupported action: %s" % action)
