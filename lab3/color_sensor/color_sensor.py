@@ -16,15 +16,21 @@ class ColorSensor:
 
     DEFAULT_COLOR_REFERENCES = {
         "RED": (0.8525, 0.0863, 0.0612),
-        "GREEN": (0.1667, 0.6631, 0.1703),
+        "GREEN": (0.3988, 0.5420, 0.0593),
         "BLUE": (0.1800, 0.2500, 0.5700),
-        "YELLOW": (0.6077, 0.3580, 0.0343),
+        "YELLOW": (0.5678, 0.3906, 0.0416),
         "ORANGE": (0.6700, 0.2900, 0.0400),
         "WHITE": (0.3333, 0.3333, 0.3333),
     }
     MARKER_DISTANCE_THRESHOLD = 0.18
+    BED_DISTANCE_THRESHOLD = 0.38
+    YELLOW_DISTANCE_THRESHOLD = 0.10
+    GREEN_DISTANCE_THRESHOLD = 0.12
+    YELLOW_MIN_BRIGHTNESS = 140.0
+    GREEN_MIN_BRIGHTNESS = 60.0
     BLACK_BRIGHTNESS = 18.0
-    WHITE_BRIGHTNESS = 140.0
+    DARK_SUM_THRESHOLD = 60.0
+    WHITE_BRIGHTNESS = 260.0
     INTERSECTION_RATIO_THRESHOLD = 0.18
 
     def __init__(self, sensor: EV3ColorSensor):
@@ -117,7 +123,7 @@ class ColorSensor:
 
     def classify_color(self, rgb: Tuple[float, float, float]) -> str:
         brightness = self.get_brightness(rgb)
-        if brightness <= self.BLACK_BRIGHTNESS:
+        if sum(rgb) <= self.DARK_SUM_THRESHOLD or brightness <= self.BLACK_BRIGHTNESS:
             return "BLACK"
         if brightness >= self.WHITE_BRIGHTNESS:
             return "WHITE"
@@ -131,6 +137,27 @@ class ColorSensor:
             if dist < closest_dist:
                 closest_dist = dist
                 color_found = name
+
+        if (
+            color_found == "YELLOW"
+            and brightness >= self.YELLOW_MIN_BRIGHTNESS
+            and closest_dist <= self.YELLOW_DISTANCE_THRESHOLD
+        ):
+            return color_found
+        if color_found == "YELLOW":
+            return "UNKNOWN"
+
+        if (
+            color_found == "GREEN"
+            and brightness >= self.GREEN_MIN_BRIGHTNESS
+            and closest_dist <= self.GREEN_DISTANCE_THRESHOLD
+        ):
+            return color_found
+        if color_found == "GREEN":
+            return "UNKNOWN"
+
+        if color_found == "RED" and closest_dist <= self.BED_DISTANCE_THRESHOLD:
+            return color_found
 
         if closest_dist > self.MARKER_DISTANCE_THRESHOLD:
             return "UNKNOWN"

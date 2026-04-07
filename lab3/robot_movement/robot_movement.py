@@ -137,22 +137,33 @@ class RobotMovement:
         direction = 1 if motor_degrees >= 0 else -1
         target_degrees = abs(motor_degrees)
         self.reset_drive_reference()
-        self.gyro_sensor.set_reference()
+        self.start_heading_hold()
 
         while abs(self.get_average_encoder()) < target_degrees:
-            heading_error = self.gyro_sensor.get_angle()
-            correction = self._clamp(
-                heading_error * self.HEADING_GAIN,
-                -self.MAX_HEADING_CORRECTION,
-                self.MAX_HEADING_CORRECTION,
-            )
-            left_power, right_power = self._get_trimmed_straight_powers(
-                direction * abs(power)
-            )
-            self.adjust_speed(left_power - correction, right_power + correction)
+            self.adjust_heading_hold(direction * abs(power))
             sleep(0.01)
 
         self.stop_move()
+
+    def start_heading_hold(self):
+        if self.gyro_sensor is None:
+            raise ValueError("Gyro sensor is required for heading-hold driving")
+        self.gyro_sensor.set_reference()
+
+    def adjust_heading_hold(self, base_power: float) -> float:
+        if self.gyro_sensor is None:
+            raise ValueError("Gyro sensor is required for heading-hold driving")
+
+        heading_error = self.gyro_sensor.get_angle()
+        correction = self._clamp(
+            heading_error * self.HEADING_GAIN,
+            -self.MAX_HEADING_CORRECTION,
+            self.MAX_HEADING_CORRECTION,
+        )
+        left_power, right_power = self._get_trimmed_straight_powers(base_power)
+        self.adjust_speed(left_power - correction, right_power + correction)
+
+        return correction
 
     def pivot_turn_motor_degrees(self, motor_degrees: float, power: float = 16):
         direction = 1 if motor_degrees >= 0 else -1
